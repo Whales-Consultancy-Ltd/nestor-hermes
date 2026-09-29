@@ -1,0 +1,34 @@
+version: "3.8"
+
+services:
+  hermes:
+    image: ollama/ollama:latest
+    container_name: nestor-hermes
+    restart: unless-stopped
+    volumes:
+      - hermes_data:/root/.ollama
+    environment:
+      OLLAMA_KEEP_ALIVE: 30m
+    ports:
+      - "127.0.0.1:11434:11434"
+    networks:
+      - nestor_net
+      - aegis_proxy
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=aegis_proxy"
+      - "traefik.http.routers.hermes.rule=Host(`nestor-ai.biz-4-africa.com`) && PathPrefix(`/hermes`)"
+      - "traefik.http.routers.hermes.entrypoints=websecure"
+      - "traefik.http.routers.hermes.tls.certresolver=myresolver"
+      - "traefik.http.routers.hermes.middlewares=hermes-strip"
+      - "traefik.http.middlewares.hermes-strip.stripprefix.prefixes=/hermes"
+      - "traefik.http.services.hermes.loadbalancer.server.port=11434"
+
+volumes:
+  hermes_data:
+
+networks:
+  nestor_net:
+    external: true
+  aegis_proxy:
+    external: true
