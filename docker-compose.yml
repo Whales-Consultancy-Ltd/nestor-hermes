@@ -1,5 +1,3 @@
-version: "3.8"
-
 services:
   hermes:
     image: ollama/ollama:latest
@@ -30,5 +28,6 @@ volumes:
 networks:
   nestor_net:
     external: true
+    name: nestor-agent-platform_nestor_net
   aegis_proxy:
     external: true
