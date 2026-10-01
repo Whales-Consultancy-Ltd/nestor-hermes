@@ -1,3 +1,11 @@
 .env
+.env.*
+*.env
+secrets*
+secrets.env
+credentials*
+*.pem
+*.key
+*.p12
 *.log
 .DS_Store
