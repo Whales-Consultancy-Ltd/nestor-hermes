@@ -1,0 +1,224 @@
+{
+  "name": "BIZ4A_Content_Approver",
+  "nodes": [
+    {
+      "parameters": {
+        "updates": [
+          "callback_query"
+        ],
+        "additionalFields": {}
+      },
+      "name": "Telegram Trigger",
+      "type": "n8n-nodes-base.telegramTrigger",
+      "typeVersion": 1.5,
+      "position": [
+        200,
+        300
+      ],
+      "id": "telegram-trigger-1",
+      "webhookId": "a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Recupere la decision depuis le callback_query et restitue\n// le contenu en relisant le texte du message (pas de stockage externe).\nconst body = $input.first().json;\nconst cq = body.callback_query;\n\nif (!cq) {\n  throw new Error('Mise a jour recue sans callback_query : ce workflow ne doit etre declenche que par un clic sur un bouton.');\n}\n\nconst sd = $getWorkflowStaticData('global');\nsd.seen = sd.seen || {};\nconst key = String(cq.message?.message_id ?? cq.message_id ?? '');\n\nif (!key) throw new Error('callback_query sans message_id exploitable.');\n\n// Idempotence : un clic double (ou un rejeu Telegram) ne doit pas\n// republier ni remodifier deux fois le meme contenu.\nconst already = !!sd.seen[key];\nsd.seen[key] = { at: new Date().toISOString(), decision: cq.data };\nsd.seen = Object.fromEntries(Object.entries(sd.seen).slice(-500)); // fenetre glissante\n\nconst text = String(cq.message?.text ?? '');\nconst grab = (re) => { const m = text.match(re); return m ? m[1].trim() : ''; };\n\nconst hook = grab(/\\u{1FA9D} Hook\\s*:\\s*([\\s\\S]*?)(?=\\u{1F4C4} Body)/u);\nconst body_ = grab(/\\u{1F4C4} Body\\s*:\\s*([\\s\\S]*?)(?=\\u{1F4D7} CTA)/u);\nconst cta = grab(/\\u{1F4D7} CTA\\s*:\\s*([\\s\\S]*?)(?=\\n_?\\u23F1|$)/u);\nconst theme = grab(/\\u{1F4CC} Th\\u00e8me\\s*:\\s*(.+)/u);\n\nconst decision = ['approuver', 'rejeter', 'regenerer'].includes(cq.data) ? cq.data : 'inconnu';\n\nreturn [{\n  json: {\n    decision,\n    deja_traite: already,\n    callback_query_id: cq.id,\n    chat_id: String(cq.message?.chat?.id ?? ''),\n    message_id: key,\n    user: cq.from?.username || String(cq.from?.id ?? ''),\n    theme, hook, body: body_, call_to_action: cta,\n    texte_integral: text\n  }\n}];"
+      },
+      "name": "Parse Decision",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        420,
+        300
+      ],
+      "id": "parse-decision-1"
+    },
+    {
+      "parameters": {
+        "operation": "answerCallbackQuery",
+        "chatId": "={{ $json.chat_id }}",
+        "callbackQueryId": "={{ $json.callback_query_id }}",
+        "text": "={{ $json.deja_traite ? 'Déjà traité (aucune action)' : $json.decision === 'approuver' ? '✅ Approuvé' : $json.decision === 'rejeter' ? '❌ Rejeté' : '🔄 Régénération demandée' }}"
+      },
+      "name": "Ack Callback",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        640,
+        300
+      ],
+      "id": "ack-callback-1",
+      "credentials": {
+        "telegramApi": {
+          "id": "o2cm9Tyzy89zPU7X",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "dec-1",
+              "leftValue": "={{ $json.decision }}",
+              "rightValue": "approuver",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": false,
+        "options": {}
+      },
+      "name": "Approuve ?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        860,
+        300
+      ],
+      "id": "if-approved-1"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Enregistre le post approuve. Phase 5 (publication LinkedIn/X/FB/IG)\n// consommera cette structure : il suffira d'inserer les noeuds de publication ici.\nconst sd = $getWorkflowStaticData('global');\nsd.approuves = sd.approuves || {};\nconst j = $input.first().json;\n\nsd.approuves[j.message_id] = {\n  approuve_par: j.user,\n  approuve_le: new Date().toISOString(),\n  theme: j.theme,\n  post: { hook: j.hook, body: j.body, call_to_action: j.call_to_action },\n  publie: false          // bascule a true par les noeuds de publication (Phase 5)\n};\nsd.approuves = Object.fromEntries(Object.entries(sd.approuves).slice(-200));\n\nreturn [{ json: {\n  decision: j.decision,\n  chat_id: j.chat_id,\n  message_id: j.message_id,\n  user: j.user,\n  theme: j.theme,\n  hook: j.hook,\n  body: j.body,\n  call_to_action: j.call_to_action,\n  deja_traite: j.deja_traite\n} }];"
+      },
+      "name": "Enregistrer Publication",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1080,
+        200
+      ],
+      "id": "register-1"
+    },
+    {
+      "parameters": {
+        "operation": "editMessageText",
+        "chatId": "={{ $json.chat_id }}",
+        "messageId": "={{ $json.message_id }}",
+        "text": "=✅ *Approuvé* par {{$json.user}}\n\n📌 {{$json.theme}}\n\n📗 *En attente de publication* (Phase 5)\n\n🪝 {{$json.hook}}",
+        "additionalFields": {
+          "parse_mode": "Markdown"
+        }
+      },
+      "name": "Edit Message Approuve",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1300,
+        200
+      ],
+      "id": "edit-approved-1",
+      "credentials": {
+        "telegramApi": {
+          "id": "o2cm9Tyzy89zPU7X",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "editMessageText",
+        "chatId": "={{ $json.chat_id }}",
+        "messageId": "={{ $json.message_id }}",
+        "text": "={{ $json.decision === 'rejeter' ? '❌ *Rejeté* par ' + $json.user + '\\n\\nUtilise le bouton 🔄 Régénérer pour repartir de ce thème.' : '🔄 *Régénération demandée* pour : ' + ($json.theme || 'thème inconnu') + '\\n\\nRelance le workflow BIZ4A_Content_Generator via Manual Trigger.' }}",
+        "additionalFields": {
+          "parse_mode": "Markdown"
+        }
+      },
+      "name": "Edit Message Refuse",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1080,
+        460
+      ],
+      "id": "edit-rejected-1",
+      "credentials": {
+        "telegramApi": {
+          "id": "o2cm9Tyzy89zPU7X",
+          "name": "Telegram account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Telegram Trigger": {
+      "main": [
+        [
+          {
+            "node": "Parse Decision",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Decision": {
+      "main": [
+        [
+          {
+            "node": "Ack Callback",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ack Callback": {
+      "main": [
+        [
+          {
+            "node": "Approuve ?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Approuve ?": {
+      "main": [
+        [
+          {
+            "node": "Enregistrer Publication",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Edit Message Refuse",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Enregistrer Publication": {
+      "main": [
+        [
+          {
+            "node": "Edit Message Approuve",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "saveDataSuccessExecution": "all",
+    "saveDataErrorExecution": "all"
+  }
+}

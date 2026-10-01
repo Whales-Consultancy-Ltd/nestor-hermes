@@ -23,7 +23,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const themes = ['Actualit\u00e9 OHADA', 'Conseil Gestion PME', 'SuccesStory BIZ4A', 'Innovation Odoo'];\nconst dayOfYear = Math.floor((new Date() - new Date(new Date().getFullYear(), 0, 0)) / (1000 * 60 * 60 * 24));\nconst selectedTheme = themes[dayOfYear % themes.length];\nreturn [{ json: { theme: selectedTheme, date: new Date().toISOString() } }];"
+        "jsCode": "const themes = ['Actualité OHADA', 'Conseil Gestion PME', 'SuccesStory BIZ4A', 'Innovation Odoo'];\nconst dayOfYear = Math.floor((new Date() - new Date(new Date().getFullYear(), 0, 0)) / (1000 * 60 * 60 * 24));\nconst selectedTheme = themes[dayOfYear % themes.length];\nreturn [{ json: { theme: selectedTheme, date: new Date().toISOString() } }];"
       },
       "name": "Theme Picker",
       "type": "n8n-nodes-base.code",
@@ -40,7 +40,7 @@
         "url": "https://nestor-ai.biz-4-africa.com/hermes/api/generate",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={\n  \"model\": \"llama3.2:3b\",\n  \"prompt\": \"R\u00e9dige un post LinkedIn professionnel et cr\u00e9dible pour BIZ4A sur le th\u00e8me : {{$json.theme}}. Public : dirigeants de PME africaines. Ton direct et concret, chiffres et situations r\u00e9elles, pas de jargon marketing, pas de formule creuse du type \u00ab en tant qu\u2019expert\u00bb. Remplis les trois champs.\",\n  \"stream\": false,\n  \"format\": {\n    \"type\": \"object\",\n    \"properties\": {\n      \"hook\": { \"type\": \"string\" },\n      \"body\": { \"type\": \"string\" },\n      \"call_to_action\": { \"type\": \"string\" }\n    },\n    \"required\": [\"hook\", \"body\", \"call_to_action\"]\n  },\n  \"options\": {\n    \"num_predict\": 400,\n    \"temperature\": 0.7,\n    \"top_p\": 0.9\n  }\n}",
+        "jsonBody": "={\n  \"model\": \"llama3.2:3b\",\n  \"prompt\": \"Rédige un post LinkedIn professionnel et crédible pour BIZ4A sur le thème : {{$json.theme}}. Public : dirigeants de PME africaines. Ton direct et concret, chiffres et situations réelles, pas de jargon marketing, pas de formule creuse du type « en tant qu’expert». Remplis les trois champs.\",\n  \"stream\": false,\n  \"format\": {\n    \"type\": \"object\",\n    \"properties\": {\n      \"hook\": { \"type\": \"string\" },\n      \"body\": { \"type\": \"string\" },\n      \"call_to_action\": { \"type\": \"string\" }\n    },\n    \"required\": [\"hook\", \"body\", \"call_to_action\"]\n  },\n  \"options\": {\n    \"num_predict\": 400,\n    \"temperature\": 0.7,\n    \"top_p\": 0.9\n  }\n}",
         "options": {
           "timeout": 180000
         }
@@ -60,7 +60,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// Normalise la reponse d'Ollama en champs stables.\n// Supporte : structured outputs (format=schema), JSON brut, ou texte avec objet imbrique.\nconst data = $input.first().json;\nconst theme = $('Theme Picker').first().json.theme;\n\nconst raw = data.response ?? data.message?.content ?? '';\nlet parsed = null;\n\nconst tryParse = (s) => { try { return JSON.parse(s); } catch (_) { return null; } };\n\nif (typeof raw === 'object' && raw !== null) parsed = raw;\nelse {\n  parsed = tryParse(String(raw));\n  if (!parsed) {\n    const m = String(raw).match(/\\{[\\s\\S]*\\}/);\n    if (m) parsed = tryParse(m[0]);\n  }\n}\n\nconst field = (k) => {\n  const v = parsed?.[k];\n  return typeof v === 'string' ? v.trim() : '';\n};\n\nconst hook = field('hook');\nconst body = field('body');\nconst call_to_action = field('call_to_action');\n\nif (!hook && !body && !call_to_action && !parsed) {\n  throw new Error(`Reponse LLM inexploitable (modele=${data.model ?? 'n/a'}). Brut: ${String(raw).slice(0, 300)}`);\n}\n\nreturn [{\n  json: {\n    theme,\n    hook,\n    body,\n    call_to_action,\n    complete: !!(hook && body && call_to_action),\n    model: data.model ?? 'llama3.2:3b',\n    total_duration_ms: typeof data.total_duration === 'number' ? Math.round(data.total_duration / 1e6) : null,\n    raw_preview: String(raw).slice(0, 300)\n  }\n}];"
+        "jsCode": "// Normalise la reponse d'Ollama en champs stables.\n// Supporte : structured outputs (format=schema), JSON brut, ou texte avec objet imbrique.\nconst data = $input.first().json;\nconst theme = $('Theme Picker').first().json.theme;\n\nconst raw = data.response ?? data.message?.content ?? '';\nlet parsed = null;\n\nconst tryParse = (s) => { try { return JSON.parse(s); } catch (_) { return null; } };\n\nif (typeof raw === 'object' && raw !== null) parsed = raw;\nelse {\n  parsed = tryParse(String(raw));\n  if (!parsed) {\n    const m = String(raw).match(/\\{[\\s\\S]*\\}/);\n    if (m) parsed = tryParse(m[0]);\n  }\n}\n\nconst field = (k) => {\n  const v = parsed?.[k];\n  return typeof v === 'string' ? v.trim() : '';\n};\n\nconst hook = field('hook');\nconst body = field('body');\nconst call_to_action = field('call_to_action');\n\nif (!hook && !body && !call_to_action && !parsed) {\n  throw new Error(`Reponse LLM inexploitable (modele=${data.model ?? 'n/a'}). Brut: ${String(raw).slice(0, 300)}`);\n}\n\n// Le message Telegram est envoye en parse_mode Markdown (legacy).\n// Sans echappement, un simple \"_\" ou \"*\" produit par le modele fait\n// echouer l'API Telegram en 400 \"can't parse entities\".\nconst md = (s) => String(s).replace(/([_*`[\\]])/g, '\\\\$1');\n\nreturn [{\n  json: {\n    theme,\n    hook,\n    body,\n    call_to_action,\n    // versions echappees, pretes pour Telegram\n    hook_md: md(hook),\n    body_md: md(body),\n    cta_md: md(call_to_action),\n    complete: !!(hook && body && call_to_action),\n    model: data.model ?? 'llama3.2:3b',\n    total_duration_ms: typeof data.total_duration === 'number' ? Math.round(data.total_duration / 1e6) : null,\n    raw_preview: String(raw).slice(0, 300)\n  }\n}];"
       },
       "name": "Parse Content",
       "type": "n8n-nodes-base.code",
@@ -75,9 +75,10 @@
       "parameters": {
         "operation": "sendMessage",
         "chatId": "5387896782",
-        "text": "=\ud83e\udd16 *Nouveau contenu BIZ4A g\u00e9n\u00e9r\u00e9*\n\n\ud83d\udccc *Th\u00e8me* : {{$json.theme}}\n\n\ud83d\ude9d *Hook* :\n{{$json.hook}}\n\n\ud83d\udcc4 *Body* :\n{{$json.body}}\n\n\ud83d\udd17 *Call to Action* :\n{{$json.call_to_action}}\n\n\u23f1_\u00a0_\u00a0_\u00a0_\u00a0__{{ $json.total_duration_ms ? ($json.total_duration_ms / 1000).toFixed(1) + ' s' : 'n/a' }}_\u00a0_\u00a0_\u00a0_\u00a0\u00a0_\u23f1",
+        "text": "=🤖 *Contenu BIZ4A — validation requise*\n\n📌 Thème : {{$json.theme}}\n\n🪝 Hook :\n{{$json.hook_md}}\n\n📄 Body :\n{{$json.body_md}}\n\n📗 CTA :\n{{$json.cta_md}}\n\n_⏱ {{ $json.total_duration_ms ? ($json.total_duration_ms / 1000).toFixed(1) + ' s' : 'n/a' }}_",
         "additionalFields": {
-          "parse_mode": "Markdown"
+          "parse_mode": "Markdown",
+          "replyMarkup": "={{ { \"inlineKeyboard\": [ [ { \"text\": \"\\u2705 Approuver\", \"callback_data\": \"approuver\" }, { \"text\": \"\\u274C Rejeter\", \"callback_data\": \"rejeter\" }, { \"text\": \"🔄 Régénérer\", \"callback_data\": \"regenerer\" } ] ] } }}"
         }
       },
       "name": "Telegram Approval",
