@@ -1,0 +1,120 @@
+{
+  "name": "BIZ4A_Content_Generator",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 24
+            }
+          ]
+        }
+      },
+      "name": "Cron Trigger",
+      "type": "n8n-nodes-base.cron",
+      "typeVersion": 1,
+      "position": [250, 300],
+      "id": "f698d01e-c21f-47cd-8c8c-aa3f0fab31b1"
+    },
+    {
+      "parameters": {
+        "jsCode": "const themes = ['Actualité OHADA', 'Conseil Gestion PME', 'SuccesStory BIZ4A', 'Innovation Odoo'];\nconst dayOfYear = Math.floor((new Date() - new Date(new Date().getFullYear(), 0, 0)) / (1000 * 60 * 60 * 24));\nconst selectedTheme = themes[dayOfYear % themes.length];\nreturn [{ json: { theme: selectedTheme, date: new Date().toISOString() } }];"
+      },
+      "name": "Theme Picker",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [450, 300],
+      "id": "ee24fa18-d7a0-4e3b-b79a-7bb81932bda1"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://nestor-ai.biz-4-africa.com/hermes/api/generate",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"nous-hermes2\",\n  \"prompt\": \"Génère un post LinkedIn professionnel pour BIZ4A sur le thème : {{$json.theme}}. Format JSON strict avec les champs: hook, body, call_to_action.\",\n  \"stream\": false\n}",
+        "options": {}
+      },
+      "name": "Hermes LLM Request",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [650, 300],
+      "id": "eed33161-7ebb-4492-bdae-2baa2534786d"
+    },
+    {
+      "parameters": {
+        "from": "n8n@biz-4-africa.com",
+        "to": "vincent@biz-4-africa.com",
+        "subject": "BIZ4A Content Approval - {{$json.theme}} - {{$json.date}}",
+        "html": "<p>Bonjour,</p>\n<p>Un nouveau contenu a été généré par Hermes pour BIZ4A. Veuillez reviewer ci-dessous et répondre par 'Approuver' ou 'Modifier' dans l'objet du email.</p>\n<p><strong>Thème :</strong> {{$json.theme}}</p>\n<p><strong>Hook :</strong> {{$json.hook}}</p>\n<p><strong>Body :</strong> {{$json.body}}</p>\n<p><strong>Call to Action :</strong> {{$json.call_to_action}}</p>\n<p>Répondez à cet email avec <em>Approuver</em> pour valider l'envoi sur les réseaux sociaux, ou <em>Modifier</em> pour recommencer.</p>\n<p>Cordialement,\nL'équipe BIZ4A</p>",
+        "mode": "html"
+      },
+      "name": "Email Approval",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 1,
+      "position": [850, 300],
+      "id": "email-approval-1"
+    },
+    {
+      "parameters": {
+        "code": "const emailResponse = items[0].json?.body || items[0].json?.text || '';\nconst approved = emailResponse.toLowerCase().includes('approuver') || emailResponse.toLowerCase().includes('approve');\nreturn [{ json: { approved } }];"
+      },
+      "name": "Code Approval Check",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1050, 300],
+      "id": "code-approval-1"
+    }
+  ],
+  "connections": {
+    "Cron Trigger": {
+      "main": [
+        [
+          {
+            "node": "Theme Picker",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Theme Picker": {
+      "main": [
+        [
+          {
+            "node": "Hermes LLM Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Hermes LLM Request": {
+      "main": [
+        [
+          {
+            "node": "Email Approval",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Email Approval": {
+      "main": [
+        [
+          {
+            "node": "Code Approval Check",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

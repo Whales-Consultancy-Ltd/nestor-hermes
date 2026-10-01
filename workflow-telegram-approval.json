@@ -1,0 +1,173 @@
+{
+  "name": "BIZ4A_Content_Generator",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 24
+            }
+          ]
+        }
+      },
+      "name": "Cron Trigger",
+      "type": "n8n-nodes-base.cron",
+      "typeVersion": 1,
+      "position": [
+        250,
+        300
+      ],
+      "id": "cron-trigger-1"
+    },
+    {
+      "parameters": {
+        "jsCode": "const themes = ['Actualit\u00e9 OHADA', 'Conseil Gestion PME', 'SuccesStory BIZ4A', 'Innovation Odoo'];\nconst dayOfYear = Math.floor((new Date() - new Date(new Date().getFullYear(), 0, 0)) / (1000 * 60 * 60 * 24));\nconst selectedTheme = themes[dayOfYear % themes.length];\nreturn [{ json: { theme: selectedTheme, date: new Date().toISOString() } }];"
+      },
+      "name": "Theme Picker",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        450,
+        300
+      ],
+      "id": "theme-picker-1"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://nestor-ai.biz-4-africa.com/hermes/api/generate",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"llama3.2:3b\",\n  \"prompt\": \"R\u00e9dige un post LinkedIn professionnel et cr\u00e9dible pour BIZ4A sur le th\u00e8me : {{$json.theme}}. Public : dirigeants de PME africaines. Ton direct et concret, chiffres et situations r\u00e9elles, pas de jargon marketing, pas de formule creuse du type \u00ab en tant qu\u2019expert\u00bb. Remplis les trois champs.\",\n  \"stream\": false,\n  \"format\": {\n    \"type\": \"object\",\n    \"properties\": {\n      \"hook\": { \"type\": \"string\" },\n      \"body\": { \"type\": \"string\" },\n      \"call_to_action\": { \"type\": \"string\" }\n    },\n    \"required\": [\"hook\", \"body\", \"call_to_action\"]\n  },\n  \"options\": {\n    \"num_predict\": 400,\n    \"temperature\": 0.7,\n    \"top_p\": 0.9\n  }\n}",
+        "options": {
+          "timeout": 180000
+        }
+      },
+      "name": "LLM Request (Ollama)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        650,
+        300
+      ],
+      "id": "ollama-llm-1",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Normalise la reponse d'Ollama en champs stables.\n// Supporte : structured outputs (format=schema), JSON brut, ou texte avec objet imbrique.\nconst data = $input.first().json;\nconst theme = $('Theme Picker').first().json.theme;\n\nconst raw = data.response ?? data.message?.content ?? '';\nlet parsed = null;\n\nconst tryParse = (s) => { try { return JSON.parse(s); } catch (_) { return null; } };\n\nif (typeof raw === 'object' && raw !== null) parsed = raw;\nelse {\n  parsed = tryParse(String(raw));\n  if (!parsed) {\n    const m = String(raw).match(/\\{[\\s\\S]*\\}/);\n    if (m) parsed = tryParse(m[0]);\n  }\n}\n\nconst field = (k) => {\n  const v = parsed?.[k];\n  return typeof v === 'string' ? v.trim() : '';\n};\n\nconst hook = field('hook');\nconst body = field('body');\nconst call_to_action = field('call_to_action');\n\nif (!hook && !body && !call_to_action && !parsed) {\n  throw new Error(`Reponse LLM inexploitable (modele=${data.model ?? 'n/a'}). Brut: ${String(raw).slice(0, 300)}`);\n}\n\nreturn [{\n  json: {\n    theme,\n    hook,\n    body,\n    call_to_action,\n    complete: !!(hook && body && call_to_action),\n    model: data.model ?? 'llama3.2:3b',\n    total_duration_ms: typeof data.total_duration === 'number' ? Math.round(data.total_duration / 1e6) : null,\n    raw_preview: String(raw).slice(0, 300)\n  }\n}];"
+      },
+      "name": "Parse Content",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        850,
+        300
+      ],
+      "id": "parse-content-1"
+    },
+    {
+      "parameters": {
+        "operation": "sendMessage",
+        "chatId": "5387896782",
+        "text": "=\ud83e\udd16 *Nouveau contenu BIZ4A g\u00e9n\u00e9r\u00e9*\n\n\ud83d\udccc *Th\u00e8me* : {{$json.theme}}\n\n\ud83d\ude9d *Hook* :\n{{$json.hook}}\n\n\ud83d\udcc4 *Body* :\n{{$json.body}}\n\n\ud83d\udd17 *Call to Action* :\n{{$json.call_to_action}}\n\n\u23f1_\u00a0_\u00a0_\u00a0_\u00a0__{{ $json.total_duration_ms ? ($json.total_duration_ms / 1000).toFixed(1) + ' s' : 'n/a' }}_\u00a0_\u00a0_\u00a0_\u00a0\u00a0_\u23f1",
+        "additionalFields": {
+          "parse_mode": "Markdown"
+        }
+      },
+      "name": "Telegram Approval",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1050,
+        300
+      ],
+      "id": "telegram-approval-1",
+      "credentials": {
+        "telegramApi": {
+          "id": "o2cm9Tyzy89zPU7X",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {},
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        250,
+        500
+      ],
+      "id": "manual-trigger-1"
+    }
+  ],
+  "connections": {
+    "Cron Trigger": {
+      "main": [
+        [
+          {
+            "node": "Theme Picker",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Manual Trigger": {
+      "main": [
+        [
+          {
+            "node": "Theme Picker",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Theme Picker": {
+      "main": [
+        [
+          {
+            "node": "LLM Request (Ollama)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "LLM Request (Ollama)": {
+      "main": [
+        [
+          {
+            "node": "Parse Content",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Content": {
+      "main": [
+        [
+          {
+            "node": "Telegram Approval",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all"
+  }
+}
