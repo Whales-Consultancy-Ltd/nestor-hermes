@@ -16,11 +16,17 @@
         300
       ],
       "id": "telegram-trigger-1",
-      "webhookId": "a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d"
+      "webhookId": "a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d",
+      "credentials": {
+        "telegramApi": {
+          "id": "o2cm9Tyzy89zPU7X",
+          "name": "Telegram account"
+        }
+      }
     },
     {
       "parameters": {
-        "jsCode": "// Recupere la decision depuis le callback_query et restitue\n// le contenu en relisant le texte du message (pas de stockage externe).\nconst body = $input.first().json;\nconst cq = body.callback_query;\n\nif (!cq) {\n  throw new Error('Mise a jour recue sans callback_query : ce workflow ne doit etre declenche que par un clic sur un bouton.');\n}\n\nconst sd = $getWorkflowStaticData('global');\nsd.seen = sd.seen || {};\nconst key = String(cq.message?.message_id ?? cq.message_id ?? '');\n\nif (!key) throw new Error('callback_query sans message_id exploitable.');\n\n// Idempotence : un clic double (ou un rejeu Telegram) ne doit pas\n// republier ni remodifier deux fois le meme contenu.\nconst already = !!sd.seen[key];\nsd.seen[key] = { at: new Date().toISOString(), decision: cq.data };\nsd.seen = Object.fromEntries(Object.entries(sd.seen).slice(-500)); // fenetre glissante\n\nconst text = String(cq.message?.text ?? '');\nconst grab = (re) => { const m = text.match(re); return m ? m[1].trim() : ''; };\n\nconst hook = grab(/\\u{1FA9D} Hook\\s*:\\s*([\\s\\S]*?)(?=\\u{1F4C4} Body)/u);\nconst body_ = grab(/\\u{1F4C4} Body\\s*:\\s*([\\s\\S]*?)(?=\\u{1F4D7} CTA)/u);\nconst cta = grab(/\\u{1F4D7} CTA\\s*:\\s*([\\s\\S]*?)(?=\\n_?\\u23F1|$)/u);\nconst theme = grab(/\\u{1F4CC} Th\\u00e8me\\s*:\\s*(.+)/u);\n\nconst decision = ['approuver', 'rejeter', 'regenerer'].includes(cq.data) ? cq.data : 'inconnu';\n\nreturn [{\n  json: {\n    decision,\n    deja_traite: already,\n    callback_query_id: cq.id,\n    chat_id: String(cq.message?.chat?.id ?? ''),\n    message_id: key,\n    user: cq.from?.username || String(cq.from?.id ?? ''),\n    theme, hook, body: body_, call_to_action: cta,\n    texte_integral: text\n  }\n}];"
+        "jsCode": "// Recupere la decision depuis le callback_query et restitue\n// le contenu en relisant le texte du message (pas de stockage externe).\nconst body = $input.first().json;\nconst cq = body.callback_query;\n\nif (!cq) {\n  throw new Error('Mise a jour recue sans callback_query : ce workflow ne doit etre declenche que par un clic sur un bouton.');\n}\n\nconst sd = $getWorkflowStaticData('global');\nsd.seen = sd.seen || {};\nconst key = String(cq.message?.message_id ?? cq.message_id ?? '');\n\nif (!key) throw new Error('callback_query sans message_id exploitable.');\n\n// Idempotence : un clic double (ou un rejeu Telegram) ne doit pas\n// republier ni remodifier deux fois le meme contenu.\nconst cqDecision = ['approuver', 'rejeter', 'regenerer'].includes(cq.data) ? cq.data : 'inconnu';\nconst previous = sd.seen[key];\n// Un clic n est un doublon que si la MEME decision a deja ete appliquee.\n// Changer d avis (Approuver puis Rejeter) doit rester possible.\nconst already = !!previous && previous.decision === cqDecision;\nsd.seen[key] = { at: new Date().toISOString(), decision: cqDecision };\nsd.seen = Object.fromEntries(Object.entries(sd.seen).slice(-500)); // fenetre glissante\n\nconst text = String(cq.message?.text ?? '');\nconst grab = (re) => { const m = text.match(re); return m ? m[1].trim() : ''; };\n\nconst hook = grab(/\\u{1FA9D} Hook\\s*:\\s*([\\s\\S]*?)(?=\\u{1F4C4} Body)/u);\nconst body_ = grab(/\\u{1F4C4} Body\\s*:\\s*([\\s\\S]*?)(?=\\u{1F4D7} CTA)/u);\nconst cta = grab(/\\u{1F4D7} CTA\\s*:\\s*([\\s\\S]*?)(?=\\n_?\\u23F1|$)/u);\nconst theme = grab(/\\u{1F4CC} Th\\u00e8me\\s*:\\s*(.+)/u);\n\nconst decision = cqDecision;\n\nreturn [{\n  json: {\n    decision,\n    deja_traite: already,\n    callback_query_id: cq.id,\n    chat_id: String(cq.message?.chat?.id ?? ''),\n    message_id: key,\n    user: cq.from?.username || String(cq.from?.id ?? ''),\n    theme, hook, body: body_, call_to_action: cta,\n    texte_integral: text\n  }\n}];"
       },
       "name": "Parse Decision",
       "type": "n8n-nodes-base.code",
@@ -33,25 +39,16 @@
     },
     {
       "parameters": {
-        "operation": "answerCallbackQuery",
-        "chatId": "={{ $json.chat_id }}",
-        "callbackQueryId": "={{ $json.callback_query_id }}",
-        "text": "={{ $json.deja_traite ? 'Déjà traité (aucune action)' : $json.decision === 'approuver' ? '✅ Approuvé' : $json.decision === 'rejeter' ? '❌ Rejeté' : '🔄 Régénération demandée' }}"
+        "jsCode": "// Confirme la reception du clic et CONSERVE les donnees du parseur.\n// Un noeud Telegram natif remplace la charge utile par {ok, result} :\n// il perdrait decision et le routage IF partirait sur la mauvaise branche.\n// On fusionne donc ici, et l accuse visuel est porte par Edit Message.\nconst parsed = $('Parse Decision').first().json;\nreturn [{ json: {\n  ...parsed,\n  acked_at: new Date().toISOString()\n} }];"
       },
       "name": "Ack Callback",
-      "type": "n8n-nodes-base.telegram",
-      "typeVersion": 1.2,
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
       "position": [
         640,
         300
       ],
-      "id": "ack-callback-1",
-      "credentials": {
-        "telegramApi": {
-          "id": "o2cm9Tyzy89zPU7X",
-          "name": "Telegram account"
-        }
-      }
+      "id": "ack-callback-2"
     },
     {
       "parameters": {
@@ -59,7 +56,7 @@
           "options": {
             "caseSensitive": true,
             "leftValue": "",
-            "typeValidation": "strict",
+            "typeValidation": "loose",
             "version": 2
           },
           "conditions": [
@@ -75,14 +72,14 @@
           ],
           "combinator": "and"
         },
-        "looseTypeValidation": false,
+        "looseTypeValidation": true,
         "options": {}
       },
       "name": "Approuve ?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
       "position": [
-        860,
+        1080,
         300
       ],
       "id": "if-approved-1"
@@ -108,7 +105,8 @@
         "text": "=✅ *Approuvé* par {{$json.user}}\n\n📌 {{$json.theme}}\n\n📗 *En attente de publication* (Phase 5)\n\n🪝 {{$json.hook}}",
         "additionalFields": {
           "parse_mode": "Markdown"
-        }
+        },
+        "resource": "message"
       },
       "name": "Edit Message Approuve",
       "type": "n8n-nodes-base.telegram",
@@ -123,7 +121,8 @@
           "id": "o2cm9Tyzy89zPU7X",
           "name": "Telegram account"
         }
-      }
+      },
+      "onError": "continueRegularOutput"
     },
     {
       "parameters": {
@@ -133,7 +132,8 @@
         "text": "={{ $json.decision === 'rejeter' ? '❌ *Rejeté* par ' + $json.user + '\\n\\nUtilise le bouton 🔄 Régénérer pour repartir de ce thème.' : '🔄 *Régénération demandée* pour : ' + ($json.theme || 'thème inconnu') + '\\n\\nRelance le workflow BIZ4A_Content_Generator via Manual Trigger.' }}",
         "additionalFields": {
           "parse_mode": "Markdown"
-        }
+        },
+        "resource": "message"
       },
       "name": "Edit Message Refuse",
       "type": "n8n-nodes-base.telegram",
@@ -148,7 +148,8 @@
           "id": "o2cm9Tyzy89zPU7X",
           "name": "Telegram account"
         }
-      }
+      },
+      "onError": "continueRegularOutput"
     }
   ],
   "connections": {
