@@ -95,8 +95,11 @@
 
 - **Utilisateur n8n** : `Vincent Luba`
 - **Durée de vie du JWT n8n** : 30 jours (`exp = iat + 2 559 122 s`) → rotation périodique obligatoire
-- **Garde-fou** : hook `pre-commit` `.git/hooks/pre-commit` refuse tout fichier stagé contenant `eyJhbGci`, `sk-`, `oc_sk_`, `gho_`, `ghp_`, `xox*`
-- **Vérification** : `git log -p --all | grep -c 'eyJhbGci'` doit rester `0`
+- **Garde-fou** : `scripts/check-secrets.sh` — source **unique** des motifs de détection. Appelé automatiquement par le hook `pre-commit`.
+- **Contrôle** : `./scripts/check-secrets.sh` → doit afficher `RESULTAT : OK`
+  - Le contrôle **strict** exige un suffixe de ≥ 20 caractères : citer un motif dans la documentation ne déclenche jamais l'alerte.
+  - Un préfixe d'en-tête JWT seul n'est **pas** un secret (en-tête standard, présent dans des millions de jetons publics). Seul le motif à haute entropie est une preuve.
+- **Vérification de l'historique** : intégrée au script (étape 2/3) — parcourt `git log -p --all`, pas seulement l'arbre de travail.
 
 ---
 
