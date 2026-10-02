@@ -1,5 +1,10 @@
 # Nestor Hermes — Documentation Complète
 
+> ## 📌 Point d'entrée : [`WORKPLAN.md`](WORKPLAN.md)
+> Ce document est le **document de reprise** du projet : état vérifié, backlog priorisé,
+> procédures opératoires, pièges n8n 2.35.5 et journal d'erreurs.
+> Le README ci-dessous décrit l'infrastructure ; **en cas de divergence, WORKPLAN.md fait foi.**
+
 ## 📦 déploiement Docker (Phase 0-2)
 
 ### Conteneur `nestor-hermes`
