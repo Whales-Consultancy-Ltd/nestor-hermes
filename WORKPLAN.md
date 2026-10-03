@@ -174,11 +174,14 @@ Le format est déjà prêt : `Enregistrer Publication` dépose `{theme, post:{ho
   `active`) ; il faut la CLI dans le conteneur. `scripts/aegis-maintenance.sh
   archive-dup` sauvegarde d'abord le JSON via l'API, puis archive — **jamais de
   `DELETE`**. Non exécuté : SSH indisponible.
-- ⬜ Supprimer les backups laissés sur Aegis : `/srv/nestor-agent-platform/.env.bak.20261001T215259Z`,
-  `docker-compose.yml.bak-trustproxy-*`, `docker-compose.override.yml.bak.20261001T215831Z`.
-  `scripts/aegis-maintenance.sh clean-backups` liste puis supprime, **simulation par
-  défaut**. Contiennent potentiellement des secrets : à supprimer, surtout pas à
-  archiver dans le dépôt. Non exécuté : SSH indisponible.
+- ✅ **Copies de coffre supprimées** (2026-10-03) : `.env.bak*` retiré de
+  `/srv/nestor-agent-platform` (26 motifs de secrets en clair). Le `.env` vivant
+  fait foi : 98 lignes, mode 600, plus récent. **Les 18 `.bak` de compose sont
+  conservés** : ce sont des points de rollback sur un hôte en production, sans
+  secret en clair. `list-baks` inventorie, `clean-backups` purge, motif volontairement étroit. Un `.bak` appartient à `root` : suppression impossible sans
+  `sudo`.
+- ✅ Doublon `xpY6KBBcjZHweECC` : **déjà archivé** (`isArchived: true`, inactif,
+  3 nœuds). Rien à faire — et pas de redémarrage de n8n pour un cosmétique.
 - ✅ `workflow-skeleton.json` **supprimé** (nœuds `Hermes LLM Request` et
   `Email Approval`, antérieurs à Telegram ; rien ne le référençait ; récupérable
   en git via `59007f9`).
@@ -720,6 +723,28 @@ queryId: <callback_query.id>
 ### 8.5 Activation par CLI ≠ cycle de vie complet
 
 `n8n update:workflow --active=true` écrit en base sans appeler `create()` → `setWebhook` n'est pas rejoué.
+
+### 8.6 bis `n8n execute` ne peut pas servir de test
+
+`n8n execute --id=<ID>` existe et semble être la troisième voie quand l'UI est
+indisponible. **Ce n'est pas le cas** :
+
+```
+n8n Task Broker's port 5679 is already in use.
+Do you have another instance of n8n running already?
+```
+
+La CLI démarre sa propre instance, qui entre en collision avec le n8n en service.
+Il faudrait donc recréer le conteneur pour éviter la collision, c'est-à-dire
+**redémarrer la production pour satisfaire un test**. Refusé : le gain de
+confiance ne vaut pas le risque sur un `n8n` qui sert l'approbation.
+
+Il reste une subtilité : même avec un déclencheur manuel, le test ne prouverait
+pas la boucle. D'après la vérification (§2 P0), **9 générations sur 10 sont
+conformes** : la première passe, et le chemin de reprise n'est jamais emprunté.
+Pour réellement l'exercer, il faudrait forcer l'échec d'une première génération
+(resserrer le filtre temporairement) **et** un déclencheur manuel. Les deux
+relèvent de l'UI.
 
 ### 8.6 Un cron modifié par `PUT` ne se déclenche pas
 
