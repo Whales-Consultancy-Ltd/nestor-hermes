@@ -190,14 +190,45 @@ Différé à la demande du porteur de projet, mais **la clé n8n en service expi
 - Rotation n8n : 2026-10-31 au plus tard, via `scripts/set-n8n-key.sh`.
 - Webhook Telegram : à réinscrire si le bot change.
 
-### P6 — Compose Aegis cassé *(hors périmètre BIZ4A)*
+### P6 — Compose Aegis — **CORRIGÉ le 2026-10-03** *(hors périmètre BIZ4A)*
 
-`docker compose` échoue sur `/srv/nestor-agent-platform` :
+**Le diagnostic initial était partiellement faux.** Ce qui a été vérifié sur
+l'hôte le 2026-03 :
 
-- `docker-compose.override.yml` déclare `opencode-adapter` **sans image** (résidu du nettoyage Phase 0-2).
-- `email-gateway` déclare `depends_on: orchestrator`, service supprimé du compose principal.
+| Défaut annoncé | Réalité |
+|---|---|
+| `opencode-adapter` « sans image » | Vrai, mais la cause est autre : le service **n'existe pas non plus** dans le compose de base. L'override ne portait que `volumes`/`entrypoint`/`command` ; le `build:` avait disparu avec la définition. Le contexte `services/opencode-adapter/` existe bel et bien sur disque. |
+| `email-gateway` dépend d'`orchestrator` « supprimé » | Vrai. `orchestrator` n'est déclaré **nulle part** : `docker-compose.embedding-cpu.yml` n'en ajoute que des variables d'environnement à un service inexistant, ce qui ne peut pas le créer. |
 
-Conséquence : `docker compose up -d` est inutilisable sur ce projet, seul `docker restart` fonctionne. Pré-existant à ce travail, non traité.
+Le compose **déployé** (348 lignes) n'est par ailleurs pas le même que celui du
+dépôt local : le local déclare encore `orchestrator` et `opencode-adapter`. Deux
+révisions divergent — source de la confusion.
+
+**Correctif appliqué** (commenté, pas supprimé, pour rester réversible) :
+
+- `depends_on: orchestrator` neutralisé dans `docker-compose.yml`.
+- `build: ./services/opencode-adapter` + `container_name` restitués dans l'override.
+
+`docker compose config -q` **passe désormais**. Sauvegardes `*.bak-p6-20261003T134212Z`.
+Aucun conteneur n'a été (re)démarré : les 22 services tournaient avant et après.
+
+> La plateforme est **en production** sur cet hôte : `nestor-n8n`,
+> `nestor-email-gateway`, `nestor-postgres`, `nestor-redis`, `nestor-nats`,
+> `nestor-temporal`, les agents, Traefik. Ne jamais `docker compose up -d` sur
+> ce projet sans avoir vérifié ce qui serait recréé.
+
+### Point de sécurité relevé pendant P6
+
+`JWT_SECRET` n'est défini dans **aucun** `.env` : il se résout à une chaîne vide
+et est passé à `nats-secure-channel` (JetStream + auth JWT + ACL + certificats
+TLS). Un secret vide signifie des jetons signés avec une clé connue.
+
+Le service est **dormant** (`nester-nats-secure-channel` absent des conteneurs),
+donc non exposé aujourd'hui. **À définir avant de le démarrer.**
+
+```bash
+./scripts/aegis-maintenance.sh status --apply    # vérifier l'état des conteneurs
+```
 
 ---
 
@@ -241,6 +272,32 @@ Latences mesurées :
 | `llama3.2:3b` à froid | 90 s | dont **61 s de chargement** depuis le disque |
 | `nous-hermes2` | 176 s | et **renvoie un JSON vide** avec `format:json` |
 | `nous-hermes2` en production (avant bascule) | ~450 s | exécution #33 |
+
+### Concurrence : `OLLAMA_NUM_PARALLEL` — mesuré, pas supposé
+
+La variable **n'était pas définie** : le WORKPLAN concluait « `NUM_PARALLEL=1` →
+requêtes sérialisées », ce qui est juste le défaut d'Ollama sur CPU, pas un
+réglage délibéré. Le modèle n'occupe que 2,6 Go pour **6,1 Go disponibles**.
+
+Mise à `2` le 2026-10-03 (`/srv/nestor-hermes/docker-compose.yml`, projet
+**distinct** de `nestor-agent-platform` — donc indépendant de P6). Mesures à
+modèle chaud, 80 tokens :
+
+| | débit agrégé |
+|---|---|
+| séquentiel (4 req, 44 s) | **5.02 tok/s** |
+| parallèle ×2 (17 s / 25 s / 48 s) | **5.83 / 5.70 / 2.88 tok/s** |
+
+**Gain réel ≈ +15 %, pas le ×1,3 à ×1,6 attendu.** 2 vCPU sont un plafond dur, et
+la première paire est parfois *plus lente* (48 s) : le modèle résident doit
+être reconfiguré pour 2 emplacements. Gardé parce que c'est gratuit, mais ce
+n'est pas le levier. Le vrai levier pour les tests serait de lancer les requêtes
+du harnais en parallèle.
+
+> Le premier couple de mesures a été **invalidé** : le conteneur venait d'être
+> recréé, chaque requête payait le rechargement de 61 s depuis le disque
+> (`total_duration` indiquait 0,65 tok/s). Toute mesure après un redémarrage
+> doit être reprise à chaud.
 
 > Note `keep_alive` : le cron étant à 24 h, chaque exécution paie 61 s de chargement. Passer à `-1` immobiliserait 2,6 Go en RAM pour un cron quotidien — **déséquilibré, non fait volontairement**.
 
