@@ -1,0 +1,46 @@
+{
+  "mission_id": "HERMES-TERM-01",
+  "status": "done",
+  "owner": "opencode",
+  "repository": "Whales-Consultancy-Ltd/nestor-hermes",
+  "issue": null,
+  "objective": "Terminal interactif local vers le modele deploye nestor-hermes (Ollama), sans passer par n8n",
+  "priority": "P2",
+  "started_at": "2026-10-03",
+  "updated_at": "2026-10-03",
+  "completed": [
+    "scripts/hermes-chat.js ecrit (REPL + mode one-shot)",
+    "Flux SSE decode, keep_alive 30m, metriques par tour + detection de troncature",
+    "Commandes /stat /modele /systeme /temperature /limite /reset /historique /sortir",
+    "Teste contre l'instance vivante : /api/tags, /api/ps, generation 4.6s, multi-tour, one-shot",
+    "check-secrets.sh -> RESULTAT : OK",
+    "WORKPLAN.md §6 bis et §6 bis bis documentes"
+  ],
+  "in_progress": [],
+  "blocked": [],
+  "decisions": [
+    "Node sans dependance externe : le repo n'a pas de package.json, un REPL en Node natif (fetch + readline) evite d'introduire un gestionnaire de paquets",
+    "Aucun secret dans le script : l'endpoint Ollama est public derriere Traefik, URL surchargeable par HERMES_URL",
+    "Mission locale sans issue GitHub : le depot n'ouvre pas de ticket pour ce lot"
+  ],
+  "files_changed": [
+    "scripts/hermes-chat.js",
+    "missions/HERMES-TERM-01/mission.md",
+    "missions/HERMES-TERM-01/state.json",
+    "WORKPLAN.md"
+  ],
+  "tests": [
+    "node --check scripts/hermes-chat.js -> OK",
+    "printf '/stat' | node scripts/hermes-chat.js -> 2 modeles listes, llama3.2:3b charge",
+    "node scripts/hermes-chat.js -p '...' -> reponse sur stdout, metriques sur stderr",
+    "flux multi-tour + /modele nous-hermes2:latest -> OK",
+    "./scripts/check-secrets.sh -> RESULTAT : OK"
+  ],
+  "commits": [],
+  "evidence": [
+    "/api/tags -> llama3.2:3b (2.0 Go, 3.2B) + nous-hermes2:latest (6.1 Go, 11B)",
+    "generation streamee 4.6s, 27->12 tok, 5.3 tok/s",
+    "n8n.whales-consultancy.biz resout (217.182.47.144) et repond 401 : incident DNS du WORKPLAN §0 resolu"
+  ],
+  "next_action": "Poursuivre P1/P2 du WORKPLAN (deploiement des workflows) maintenant que le DNS est revenu : ./scripts/deploy-workflows.sh --check"
+}

@@ -2,7 +2,46 @@
 
 > **Document de reprise.** Écrit pour être lu sans le contexte de la conversation d'origine.
 > Toute valeur y est volontairement omise : les secrets vivent dans `~/.config/nestor/secrets.env` (hors dépôt).
-> Dernière mise à jour : 2026-10-01 — état vérifié par lectures directes de n8n, Ollama et Aegis.
+> Dernière mise à jour : 2026-10-03 — P0/P1/P2 écrits et testés hors ligne ; **déploiement n8n bloqué par une panne DNS** (§0).
+
+---
+
+## 0. Incident en cours — à lire avant tout
+
+**La zone DNS `whales-consultancy.biz` est en SERVFAIL depuis le 2026-10-02 au soir.**
+
+Constaté par deux résolveurs indépendants (Cloudflare `1.1.1.1` et Google `8.8.8.8`,
+via DoH), qui renvoient `Status 2` sur `NS` et `SOA` de la zone elle-même — la
+délégation est cassée, pas l'instance. La zone sœur `biz-4-africa.com` répond
+normalement. Conséquence :
+
+| Cible | État |
+|---|---|
+| `n8n.whales-consultancy.biz` (API, UI) | injoignable — aucun `PUT` possible |
+| `aegis.whales-consultancy.biz:8022` (SSH) | injoignable — aucun `docker exec` |
+| Traefik / Let's Encrypt sur ce domaine | injoignable |
+| `nestor-ai.biz-4-africa.com/hermes` (Ollama) | **joignable** — le modèle est testable |
+
+Le P0 a donc pu être **vérifié contre le vrai modèle** pendant toute la panne,
+mais les workflows modifiés ne sont **pas déployés** : Only `ieDcsbIeNFBCtppv`
+porte la version P0 en base (déployée avant la panne), les ajouts P2 et les
+scripts P1 sont **localisés et testés, pas poussés**.
+
+### Reprise, dans cet ordre
+
+```bash
+# 1. Le DNS est revenu, ou une IP est connue -> forcer la resolution :
+export N8N_IP=<ip>            # garde le SNI/TLS correct, sans /etc/hosts
+./scripts/deploy-workflows.sh --check   # compare local / distant, n'ecrit rien
+./scripts/deploy-workflows.sh           # sauvegarde + PUT + relecture + webhook
+
+# 2. Renseigner le token Telegram dans le coffre, puis :
+./scripts/set-telegram-webhook.sh       # verifie au passage le webhook
+
+# 3. P4, qui exige SSH :
+./scripts/aegis-maintenance.sh archive-dup --apply
+./scripts/aegis-maintenance.sh clean-backups --apply
+```
 
 ---
 
@@ -17,6 +56,8 @@ Générateur de contenu LinkedIn pour BIZ4A : génération quotidienne par IA lo
 | A | Secrets purgés du dépôt public | `git log -p --all` → 0 correspondance ; hook + `scripts/check-secrets.sh` |
 | B | Latence divisée par 15 | `nous-hermes2` 450 s → `llama3.2:3b` **23 s** |
 | C | Approbation Telegram réelle | exécution **#48** : `decision=approuver`, `user=TheHatCoder`, message édité `ok:true` |
+| D | **P0 qualité LLM** | prompt verrouillé + filtre ; **10 générations, 0 occurrence** (§2) |
+| E | **Aller-retour générateur → approbateur** | `scripts/test-telegram-roundtrip.js`, 4 cas |
 
 Boucle complète prouvée par deux exécutions consécutives :
 
@@ -25,13 +66,16 @@ Boucle complète prouvée par deux exécutions consécutives :
 #48  Approbateur  → clic reçu, décision lue, branche « Approuvé », message 9 → ok:true
 ```
 
-**Ce qui bloque :** la qualité de sortie de `llama3.2:3b` (voir §2, P0). La boucle est fonctionnelle, mais ce qu'elle approuve n'est pas publiable en l'état.
+**Ce qui bloquait :** la qualité de sortie de `llama3.2:3b` → **treat P0**.
+Ce qui bloque **maintenant** : la panne DNS (§0). La boucle est fonctionnelle et
+ne laisse plus passer d'affirmation inventée ; ce qu'elle approuve reste toutefois
+le fait d'un modèle 3b, et le filtre ne contrôle pas la véracité factuelle.
 
 ---
 
 ## 2. Backlog
 
-### P0 — Qualité de sortie du LLM  ← **risque le plus élevé du projet**
+### P0 — Qualité de sortie du LLM — **CLOS** (2026-10-02)
 
 `llama3.2:3b` s'attribue la marque et invente des chiffres. Extraits réels issus des exécutions #37 à #47 :
 
@@ -46,17 +90,78 @@ Correctif proposé — les deux ensemble, le prompt seul ne suffit pas sur un mo
 1. **Verrouillage du prompt** : interdiction explicite de la première personne (`je / mon / ma / mes / notre`) et de tout chiffre absent des données d'entrée.
 2. **Filtre post-traitement** : rejeter ou marquer `complete=false` si le texte contient un pronom possessif ou un pourcentage non fourni en entrée.
 
-Vérification : 10 générations consécutives, 0 occurrence. Publication automatique fermée tant que P0 n'est pas clos.
+**Réalisé.** Les deux correctifs sont en place, plus une boucle de régénération.
 
-### P1 — Réinscription du webhook Telegram automatisée
+1. Prompt verrouillé (interdictions explicites, listées ligne à ligne).
+2. Filtre dans `Parse Content` : `complete = champs présents ET quality_flags vide`.
+   `quality_flags` porte les occurrences exactes (`chiffre non source (hook : 20)`),
+   et le message Telegram affiche un bandeau `⚠️ NON CONFORME`.
+3. **Boucle de régénération bornée à 3** : `Est conforme ?` → `Compteur Tentative`
+   → `Tentative Epuisee ?` → retour `LLM Request`, avec `Alerte Echec` si épuisée.
+   Le compteur retransmet `theme`, sans quoi les tentatives 2 et 3 généreraient à vide.
 
-Le `setWebhook` est écrit **à la main** (§7). Toute recréation de l'approbateur casse l'approbation silencieusement. À automatiser en script, appelé par un `deploy-workflows.sh`.
+**Résultat mesuré : 9/10 conformes, 1 rejet, 0 occurrence.**
 
-### P2 — Observabilité
+Trois bugs trouvés en route, qu'aucune relecture de code n'aurait montrés :
 
-- Alerte quand `complete=false` (contenu incomplet) : aujourd'hui le contenu est tout de même envoyé avec un champ vide.
-- Compteur de publications approuvées : `Enregistrer Publication` écrit dans `$getWorkflowStaticData('global').approuves`, non exposé.
-- Le cron ne se déclenche pas après un `PUT` : voir §8, piège n8n.
+- **Le `4` de `BIZ4A` compté comme chiffre inventé.** `\d` matche le `4` de la
+  marque : tout contenu citant BIZ4A était rejeté à tort (3/10 → 5/10 conformes
+  une fois corrigé). Regex : `/(?<![\p{L}\d])\d+(?:[.,]\d+)?(?![\p{L}])/gu`.
+- **`en tant que` trop large.** Bloquait « En tant que dirigeant, **vous**
+  connaissez… », qui est de la 2ᵉ personne. Règle retirée ; l'exemple WORKPLAN
+  reste bloqué, via `j'ai`.
+- **Libellé de vérification inversé.** Le script de contrôle affichait le nombre
+  de rejets sous une mention « passe le filtre ». Le critère porte sur ce qui
+  **traverse** le filtre, pas sur ce qui est rejeté.
+
+**Réserve honnête :** le filtre couvre les classes définies au §2, pas la
+véracité factuelle. Une génération affirmait que l'OHADA provoque des
+« interdictions automatiques de produits » — invéridique, sans chiffre ni
+première personne, donc **validée par le filtre**. L'hallucination de faits par
+un modèle 3b reste un problème ouvert, distinct de P0.
+
+> Publication automatique toujours fermée : `Enregistrer Publication` écrit
+> `publie: false`. Rien ne part sans les nœuds de la phase P3.
+
+### P1 — Réinscription du webhook Telegram — **script écrit, non exécuté**
+
+Le `setWebhook` était écrit **à la main** (§7). Toute recréation de l'approbateur
+casse l'approbation silencieusement.
+
+**`scripts/set-telegram-webhook.sh`** — lit le `webhookId` sur l'API publique au
+lieu de la base SQLite du conteneur : pas de SSH, et surtout la valeur de
+l'instance vivante est utilisée. `--check` vérifie sans écrire.
+
+**`scripts/deploy-workflows.sh`** — sauvegarde → `PUT` → **relecture et comparaison
+de l'API** → réinscription du webhook. `--check` compare sans écrire.
+
+Deux garde-fous non triviaux :
+
+- **Le `webhookId` du dépôt est préservé s'il diverge du distant.** Il est généré
+  par n8n à l'activation, ce n'est pas du contenu écrit. Un `PUT` qui l'écraserait
+  changerait l'URL du webhook et casserait l'approbation jusqu'à la réinscription.
+- **La comparaison post-`PUT` se fait contre la charge envoyée**, pas contre le
+  fichier du dépôt, sinon l'injection ci-dessus déclencherait un faux écart.
+
+**Reste à faire :** renseigner `TELEGRAM_BOT_TOKEN` dans le coffre (l'API n8n
+n'expose pas les credentials, le token ne peut pas être récupéré par l'API), puis
+exécuter. Voir §0.
+
+### P2 — Observabilité — **partiellement fait, non déployé**
+
+- ✅ **Alerte `complete=false`** — un champ manquant est maintenant signalé comme
+  les autres alertes (`champ manquant (body)`) et remonte dans le bandeau. Avant,
+  le contenu incomplet partait avec un simple champ vide, sans aucun signal.
+- ✅ **Compteur de publications approuvées** — il était écrit mais jamais exposé.
+  `total_approuves` est maintenant retourné et affiché dans le message Telegram
+  (`_Publication n° 7_`). Fenêtre glissante de 200 : c'est un compteur borné,
+  pas un historique. La clé est le `message_id`, donc un double clic n'incrémente pas.
+- ✅ **La décision du filtre est tracée à l'approbation** — `qualite`
+  (`ok` / `non_conforme`) est lu dans le message et stocké avec la publication. On
+  peut enfin savoir ce qui a été validé en connaissance de cause.
+- ⬜ **Le cron ne se déclenche pas après un `PUT`** : documenté (§8.6), rappelé en
+  fin de `deploy-workflows.sh`, mais pas contourné. Le contournement dépend d'un
+  `docker restart`, donc d'un accès SSH — indisponible pendant la panne.
 
 ### P3 — Publication sociale (non commencée)
 
@@ -64,9 +169,19 @@ Le format est déjà prêt : `Enregistrer Publication` dépose `{theme, post:{ho
 
 ### P4 — Nettoyage
 
-- Archiver `BIZ4A_Content_Generator` `xpY6KBBcjZHweECC` (doublon inactif, 3 nœuds).
-- Supprimer les backups laissés sur Aegis : `/srv/nestor-agent-platform/.env.bak.20261001T215259Z`, `docker-compose.yml.bak-trustproxy-*`, `docker-compose.override.yml.bak.20261001T215831Z`.
-- `workflow-skeleton.json` est obsolète (précède la migration Telegram), à supprimer ou archiver.
+- ⬜ Archiver `BIZ4A_Content_Generator` `xpY6KBBcjZHweECC` (doublon inactif, 3 nœuds).
+  L'API publique ne sait pas archiver (`isArchived` est en lecture seule, comme
+  `active`) ; il faut la CLI dans le conteneur. `scripts/aegis-maintenance.sh
+  archive-dup` sauvegarde d'abord le JSON via l'API, puis archive — **jamais de
+  `DELETE`**. Non exécuté : SSH indisponible.
+- ⬜ Supprimer les backups laissés sur Aegis : `/srv/nestor-agent-platform/.env.bak.20261001T215259Z`,
+  `docker-compose.yml.bak-trustproxy-*`, `docker-compose.override.yml.bak.20261001T215831Z`.
+  `scripts/aegis-maintenance.sh clean-backups` liste puis supprime, **simulation par
+  défaut**. Contiennent potentiellement des secrets : à supprimer, surtout pas à
+  archiver dans le dépôt. Non exécuté : SSH indisponible.
+- ✅ `workflow-skeleton.json` **supprimé** (nœuds `Hermes LLM Request` et
+  `Email Approval`, antérieurs à Telegram ; rien ne le référençait ; récupérable
+  en git via `59007f9`).
 
 ### P5 — Rotation des clés *(différé, échéance ferme)*
 
@@ -141,7 +256,62 @@ Bot utilisé : **`@the_hat_trader_bot`** — distinct de `@The_real_nestor_ai_bo
 
 ---
 
-## 5. Les deux workflows
+## 4 bis. Chat Telegram vers Hermes
+
+**Écrit le 2026-10-03, déployé et prouvé.** Écris un message à `@the_hat_trader_bot`,
+Hermes répond.
+
+### Contrainte structurante : un seul webhook par jeton
+
+Telegram n'accepte **qu'une URL de webhook par jeton de bot**. Les deux workflows
+historiques partagent la même credential (`o2cm9Tyzy89zPU7X`). Un second
+`Telegram Trigger` autonome aurait donc **écrasé** le webhook de l'approbateur, et
+l'approbation serait morte en `403 Provided secret is not valid` — sans la moindre
+erreur visible dans les logs.
+
+Le chat a donc été intégré **dans** `BIZ4A_Content_Approver`, qui porte désormais
+les deux fonctions, avec un seul point d'entrée :
+
+```
+Telegram Trigger (message, callback_query)
+   └→ Route Evenement ─┬(callback_query)→ Parse Decision → … approbation (inchangée)
+                      └(message)       → Guard Chat → Message pertinent ?
+                                          → Hermes Chat (Ollama) → Reponse Hermes
+                                          → Telegram Reponse
+```
+
+### Garde-fous
+
+| Garde | Rôle |
+|---|---|
+| `Guard Chat` | chat `5387896782` uniquement ; ignore les bots, les médias, les commandes |
+| `Message pertinent ?` | **avant** toute requête HTTP : un message écarté ne consomme pas de génération |
+| Fiche BIZ4A | le modèle ne répond qu'avec ces faits, et dit « je n'ai pas cette information » sinon |
+| `Reponse Hermes` | borne à 4000 caractères (limite Telegram) |
+| `parse_mode` absent | un `_` ou `*` du modèle ferait échouer l'API en 400 |
+
+### Preuve
+
+Exécutions **#52 à #54** : `success`, `Telegram Reponse ok=true`, `message_id` 11, 12, 13.
+
+### Deux pièges rencontrés
+
+1. **`chat_id is empty`.** `Conserver Chat` avait été placé **avant** le nœud HTTP
+   pour transporter le `chat_id` ; or le nœud HTTP remplace intégralement la charge
+   utile. Le message partait donc vide. Correctif : relire `chat_id` chez
+   `Guard Chat` via `$('Guard Chat')`. C'est le même piège que §8.1, version HTTP.
+   Le test l'a d'abord **manqué** parce qu'il injectait `__chat_id` à la main au
+   lieu de jouer la chaîne réelle : le test a été durci pour jouer le vrai chemin.
+2. **`llama3.2:3b` hallucine sur BIZ4A.** Il a affirmé que BIZ4A était « une
+   plateforme créée par l'État ». Une fiche de faits a été ajoutée au prompt
+   système. Résultat après correctif : le modèle **refuse** plutôt que d'inventer,
+   ce qui est le bon compromis — mais il répond parfois « je ne connais pas
+   BIZ4A » alors que la fiche la décrit. **Verdict : ce bot est un intervieweur
+   approximatif, pas une source de vérité.**
+
+---
+
+## 5. Les workflows
 
 ### Sources de vérité
 
@@ -168,7 +338,9 @@ Manual Trigger┘
 | `Parse Content` | normalise la réponse, **répare les JSON tronqués**, échappe le Markdown |
 | `Telegram Approval` | message + inline keyboard *Approuver / Rejeter / Régénérer* |
 
-### Approbateur — `8D4pwY4Os56HC1UQ` (7 nœuds, actif)
+### Approbateur — `8D4pwY4Os56HC1UQ` (13 nœuds, actif)
+
+> Il porte aussi le chat Hermes (§4 bis). Le chemin d'approbation est inchangé.
 
 ```
 Telegram Trigger → Parse Decision → Ack Callback → Approuve ? ┬→ Enregistrer Publication → Edit Message Approuve
@@ -177,9 +349,10 @@ Telegram Trigger → Parse Decision → Ack Callback → Approuve ? ┬→ Enreg
 
 | Nœud | Rôle |
 |---|---|
-| `Telegram Trigger` | `updates: ['callback_query']`, credential `telegramApi` |
+| `Telegram Trigger` | `updates: ['message','callback_query']`, credential `telegramApi` |
 | `Parse Decision` | whitelist des décisions, **idempotence par `(message_id, decision)`**, refus de mise à jour sans `callback_query` |
 | `Ack Callback` | fusionne les données du parseur (voir §8, piège majeur) |
+| `Route Evenement` | `callback_query` → approbation ; `message` → chat (§4 bis) |
 | `Approuve ?` | route sur `decision === 'approuver'` |
 | `Enregistrer Publication` | dépose le post approuvé dans la static data, `publie: false` |
 | `Edit Message Approuve` / `Edit Message Refuse` | met le message Telegram à jour |
@@ -239,6 +412,62 @@ ssh the@office.biz-4-africa.com     # machine office : 3 cœurs, load 8,7, pas d
 
 ---
 
+## 6 bis. Scripts
+
+Tous lancables depuis la racine du dépôt. Aucun ne contient de secret : ils lisent
+le coffre. `check-secrets.sh` passe sur l'ensemble.
+
+| Script | Rôle | Réseau |
+|---|---|---|
+| `scripts/check-secrets.sh` | garde-fou anti-secret (arbre, `--all`, préfixes) | non |
+| `scripts/set-n8n-key.sh` | validate et installe une clé n8n (P5) | oui |
+| `scripts/deploy-workflows.sh` | sauvegarde + `PUT` + relecture + webhook | oui |
+| `scripts/set-telegram-webhook.sh` | réinscrit le webhook Telegram (`--check`) | oui |
+| `scripts/aegis-maintenance.sh` | archivage du doublon, purge des `.bak` (SSH) | oui |
+| `scripts/test-quality-filter.js` | 12 cas du filtre P0, lus depuis le workflow | non |
+| `scripts/test-telegram-roundtrip.js` | message généré → relu par l'approbateur | non |
+| `scripts/verify-p0-quality.js` | 10 générations réelles + filtre déployé | Ollama |
+| `scripts/hermes-chat.js` | **terminal interactif** vers Hermes (REPL + one-shot) | Ollama |
+
+Les deux scripts réseau acceptent `N8N_IP=<ip>` : le SNI/TLS reste correct sans
+toucher à `/etc/hosts` ni demander root. Indispensable pendant la panne DNS (§0).
+
+```bash
+node scripts/test-quality-filter.js      # garde-fou, < 1 s, hors ligne
+node scripts/test-telegram-roundtrip.js
+node scripts/verify-p0-quality.js 10     # ~6 min, 10 appels Ollama serialisés
+node scripts/hermes-chat.js              # terminal interactif Hermes
+```
+
+#### Terminal interactif Hermes — `scripts/hermes-chat.js`
+
+REPL vers l'endpoint public du conteneur `nestor-hermes`, pour interagir avec
+le modèle déployé sans passer par n8n ni par l'UI. Sans secret :
+lecture seule sur une API publique, l'URL est surchargeable par `HERMES_URL`.
+
+```bash
+node scripts/hermes-chat.js                          # llama3.2:3b, flux + métriques
+node scripts/hermes-chat.js -m nous-hermes2:latest   # 11B, ~176 s (§4)
+node scripts/hermes-chat.js -s "tu es BIZ4A" -p "..." # one-shot, stdout = réponse brute
+```
+
+Commandes : `/stat` (endpoint, modèles réellement présents, modèle chargé),
+`/modele`, `/systeme`, `/temperature`, `/limite`, `/reset`, `/historique`,
+`/sortir`.
+
+Deux points qui ne sont pas évidents à l'usage :
+
+- **`OLLAMA_NUM_PARALLEL=1`** (§4) : une génération à la fois. Une seconde
+  requête lancée en parallèle **attend** le modèle, elle ne le précharge pas.
+- **`keep_alive: 30m`** est renvoyé à chaque appel. Sans cela, la première
+  génération après 30 min d'inactivité paie les ~61 s de chargement disque
+  (§4). Le REPL maintient le modèle chaud entre deux questions.
+- Une réponse qui s'arrête net sur `num_predict` est signalée par
+  `⚠ tronque` dans la ligne de métriques — c'est la cause du §9 « Error au
+  niveau n8n », visible ici sans passer par les logs.
+
+---
+
 ## 7. Procédures opératoires
 
 ### Pousser un workflow
@@ -274,7 +503,18 @@ docker restart nestor-n8n            # ~9 s, obligatoire
 
 ⚠️ **Cette méthode écrit en base sans déclencher le cycle de vie des webhooks.** C'est pourquoi l'inscription Telegram doit être refaite à la main (§ P1). Avant tout `restart`, vérifier qu'aucune exécution n'est en cours.
 
-### Réinscrire le webhook Telegram
+### Réinscrire le webhook Telegram — **ne plus faire à la main**
+
+```bash
+./scripts/set-telegram-webhook.sh          # 1 commande : inscription + vérification
+./scripts/set-telegram-webhook.sh --check  # état courant, sans écriture
+```
+
+La procédure manuelle ci-dessous est conservée pour comprendre le mécanisme
+(l'API publique n'expose ni `setWebhook` ni la base). Elle est **périmée en usage
+courant** : le script lit le `webhookId` sur l'API et dérive le `secret_token`.
+
+### (référence) Réinscription manuelle
 
 Le `secret_token` est **déterministe** (§ code source n8n) :
 
@@ -403,7 +643,9 @@ Le jour de l'année n'est recalculé qu'à l'exécution ; le sélecteur de thèm
 
 ## 10. Historique git
 
-Cinq commits locaux, **non poussés** (`git rev-list --count origin/main..HEAD` → 5).
+Six commits locaux, **non poussés** (`git rev-list --count origin/main..HEAD` → 6).
+Le travail P0/P1/P2/P4 du 2026-10-02/03 est **en plus dans l'arbre de travail, non
+commité**, et `workflow-skeleton.json` est supprimé (`git rm`, récupérable).
 
 ```
 806d4e0 feat(BIZ4A): boucle d'approbation Telegram operationnelle
@@ -413,14 +655,26 @@ f61e88d feat(BIZ4A): approbation Telegram reelle (boutons + decision + idempoten
 4aad4b2 docs: purge le JWT n8n du README, coffre local + garde-fou pre-commit
 ```
 
+```
+ b3e7d28 docs: WORKPLAN de reprise pour le projet BIZ4A   ( workflows + scripts P0/P1/P2/P4 )
+```
+
 Rappel : `git push` n'a jamais été demandé sur ce dépôt. **Ne pas pousser sans instruction explicite.**
 
 ---
 
 ## 11. Pour reprendre
 
-1. Lire §1 (état), §2 (backlog), §3 (périmètre engagé)
-2. Choisir une tâche du backlog
-3. Consulter §7 (procédures) et §8 (pièges) **avant** toute modification
-4. Si une erreur survient : §9, puis `/api/v1/executions/<ID>?includeData=true` — les logs ne mentent pas assez, les nœuds si
-5. Après chaque modification : relire **le fichier sur disque**, pousser, puis relire **la réponse n8n**
+0. **Si le DNS de `whales-consultancy.biz` est toujours cassé : lire §0.** Tout ce
+   qui touche n8n ou Aegis est bloqué ; le générateur peut être vérifié, pas déployé.
+1. Lire §0 (incident), §1 (état), §2 (backlog), §3 (périmètre engagé)
+2. Lancer les garde-fous hors ligne avant toute modification :
+   `node scripts/test-quality-filter.js && node scripts/test-telegram-roundtrip.js`
+3. Consulter §6 bis (scripts), §7 (procédures) et §8 (pièges) **avant** toute modification
+4. Modifier via `./scripts/deploy-workflows.sh`, qui sauvegarde, pousse **et relit
+   l'API** — ne pas faire un `curl` à la main
+5. Si une erreur survient : §9, puis `/api/v1/executions/<ID>?includeData=true` — les logs ne mentent pas assez, les nœuds si
+6. Après chaque modification : relire **le fichier sur disque**, pousser, puis relire **la réponse n8n**
+7. **La boucle de régénération (P0) n'a jamais été exécutée dans n8n** : l'API ne
+   lance pas d'exécution (§8.6). Déclencher un *Manual Trigger* depuis l'UI du
+   générateur pour la prouver — c'est le seul test qui reste.

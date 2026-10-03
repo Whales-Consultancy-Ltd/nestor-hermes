@@ -4,6 +4,7 @@
     {
       "parameters": {
         "updates": [
+          "message",
           "callback_query"
         ],
         "additionalFields": {}
@@ -16,7 +17,6 @@
         300
       ],
       "id": "telegram-trigger-1",
-      "webhookId": "a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d",
       "credentials": {
         "telegramApi": {
           "id": "o2cm9Tyzy89zPU7X",
@@ -26,7 +26,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// Recupere la decision depuis le callback_query et restitue\n// le contenu en relisant le texte du message (pas de stockage externe).\nconst body = $input.first().json;\nconst cq = body.callback_query;\n\nif (!cq) {\n  throw new Error('Mise a jour recue sans callback_query : ce workflow ne doit etre declenche que par un clic sur un bouton.');\n}\n\nconst sd = $getWorkflowStaticData('global');\nsd.seen = sd.seen || {};\nconst key = String(cq.message?.message_id ?? cq.message_id ?? '');\n\nif (!key) throw new Error('callback_query sans message_id exploitable.');\n\n// Idempotence : un clic double (ou un rejeu Telegram) ne doit pas\n// republier ni remodifier deux fois le meme contenu.\nconst cqDecision = ['approuver', 'rejeter', 'regenerer'].includes(cq.data) ? cq.data : 'inconnu';\nconst previous = sd.seen[key];\n// Un clic n est un doublon que si la MEME decision a deja ete appliquee.\n// Changer d avis (Approuver puis Rejeter) doit rester possible.\nconst already = !!previous && previous.decision === cqDecision;\nsd.seen[key] = { at: new Date().toISOString(), decision: cqDecision };\nsd.seen = Object.fromEntries(Object.entries(sd.seen).slice(-500)); // fenetre glissante\n\nconst text = String(cq.message?.text ?? '');\nconst grab = (re) => { const m = text.match(re); return m ? m[1].trim() : ''; };\n\nconst hook = grab(/\\u{1FA9D} Hook\\s*:\\s*([\\s\\S]*?)(?=\\u{1F4C4} Body)/u);\nconst body_ = grab(/\\u{1F4C4} Body\\s*:\\s*([\\s\\S]*?)(?=\\u{1F4D7} CTA)/u);\nconst cta = grab(/\\u{1F4D7} CTA\\s*:\\s*([\\s\\S]*?)(?=\\n_?\\u23F1|$)/u);\nconst theme = grab(/\\u{1F4CC} Th\\u00e8me\\s*:\\s*(.+)/u);\n\nconst decision = cqDecision;\n\nreturn [{\n  json: {\n    decision,\n    deja_traite: already,\n    callback_query_id: cq.id,\n    chat_id: String(cq.message?.chat?.id ?? ''),\n    message_id: key,\n    user: cq.from?.username || String(cq.from?.id ?? ''),\n    theme, hook, body: body_, call_to_action: cta,\n    texte_integral: text\n  }\n}];"
+        "jsCode": "// Recupere la decision depuis le callback_query et restitue\n// le contenu en relisant le texte du message (pas de stockage externe).\nconst body = $input.first().json;\nconst cq = body.callback_query;\n\nif (!cq) {\n  throw new Error('Mise a jour recue sans callback_query : ce workflow ne doit etre declenche que par un clic sur un bouton.');\n}\n\nconst sd = $getWorkflowStaticData('global');\nsd.seen = sd.seen || {};\nconst key = String(cq.message?.message_id ?? cq.message_id ?? '');\n\nif (!key) throw new Error('callback_query sans message_id exploitable.');\n\n// Idempotence : un clic double (ou un rejeu Telegram) ne doit pas\n// republier ni remodifier deux fois le meme contenu.\nconst cqDecision = ['approuver', 'rejeter', 'regenerer'].includes(cq.data) ? cq.data : 'inconnu';\nconst previous = sd.seen[key];\n// Un clic n est un doublon que si la MEME decision a deja ete appliquee.\n// Changer d avis (Approuver puis Rejeter) doit rester possible.\nconst already = !!previous && previous.decision === cqDecision;\nsd.seen[key] = { at: new Date().toISOString(), decision: cqDecision };\nsd.seen = Object.fromEntries(Object.entries(sd.seen).slice(-500)); // fenetre glissante\n\nconst text = String(cq.message?.text ?? '');\nconst grab = (re) => { const m = text.match(re); return m ? m[1].trim() : ''; };\n\nconst hook = grab(/\\u{1FA9D} Hook\\s*:\\s*([\\s\\S]*?)(?=\\u{1F4C4} Body)/u);\nconst body_ = grab(/\\u{1F4C4} Body\\s*:\\s*([\\s\\S]*?)(?=\\u{1F4D7} CTA)/u);\nconst cta = grab(/\\u{1F4D7} CTA\\s*:\\s*([\\s\\S]*?)(?=\\n_?\\u23F1|$)/u);\nconst theme = grab(/\\u{1F4CC} Th\\u00e8me\\s*:\\s*(.+)/u);\n\n// P0 : le message porte un bandeau d'alerte quand le filtre de conformite\n// a rejete la generation. On le conserve pour tracer la decision humaine.\nconst qualite = /NON CONFORME/.test(text) ? 'non_conforme' : 'ok';\n\nconst decision = cqDecision;\n\nreturn [{\n  json: {\n    decision,\n    deja_traite: already,\n    callback_query_id: cq.id,\n    chat_id: String(cq.message?.chat?.id ?? ''),\n    message_id: key,\n    user: cq.from?.username || String(cq.from?.id ?? ''),\n    theme, hook, body: body_, call_to_action: cta,\n    qualite,\n    texte_integral: text\n  }\n}];"
       },
       "name": "Parse Decision",
       "type": "n8n-nodes-base.code",
@@ -86,7 +86,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// Enregistre le post approuve. Phase 5 (publication LinkedIn/X/FB/IG)\n// consommera cette structure : il suffira d'inserer les noeuds de publication ici.\nconst sd = $getWorkflowStaticData('global');\nsd.approuves = sd.approuves || {};\nconst j = $input.first().json;\n\nsd.approuves[j.message_id] = {\n  approuve_par: j.user,\n  approuve_le: new Date().toISOString(),\n  theme: j.theme,\n  post: { hook: j.hook, body: j.body, call_to_action: j.call_to_action },\n  publie: false          // bascule a true par les noeuds de publication (Phase 5)\n};\nsd.approuves = Object.fromEntries(Object.entries(sd.approuves).slice(-200));\n\nreturn [{ json: {\n  decision: j.decision,\n  chat_id: j.chat_id,\n  message_id: j.message_id,\n  user: j.user,\n  theme: j.theme,\n  hook: j.hook,\n  body: j.body,\n  call_to_action: j.call_to_action,\n  deja_traite: j.deja_traite\n} }];"
+        "jsCode": "// Enregistre le post approuve. Phase 5 (publication LinkedIn/X/FB/IG)\n// consommera cette structure : il suffira d'inserer les noeuds de publication ici.\nconst sd = $getWorkflowStaticData('global');\nsd.approuves = sd.approuves || {};\nconst j = $input.first().json;\n\nsd.approuves[j.message_id] = {\n  approuve_par: j.user,\n  approuve_le: new Date().toISOString(),\n  theme: j.theme,\n  post: { hook: j.hook, body: j.body, call_to_action: j.call_to_action },\n  // P0 : trace la decision du filtre au moment de l'approbation.\n  qualite: j.qualite || 'ok',\n  publie: false          // bascule a true par les noeuds de publication (Phase 5)\n};\nsd.approuves = Object.fromEntries(Object.entries(sd.approuves).slice(-200));\n\n// Fenetre glissante de 200 : le total est un compteur borne, pas un\n// historique complet. La cle est le message_id, donc un double clic\n// n incremente pas le compteur (l idempotence existe deja).\nconst total_approuves = Object.keys(sd.approuves).length;\n\nreturn [{ json: {\n  decision: j.decision,\n  chat_id: j.chat_id,\n  message_id: j.message_id,\n  user: j.user,\n  theme: j.theme,\n  hook: j.hook,\n  body: j.body,\n  call_to_action: j.call_to_action,\n  deja_traite: j.deja_traite,\n  qualite: j.qualite || 'ok',\n  total_approuves\n} }];"
       },
       "name": "Enregistrer Publication",
       "type": "n8n-nodes-base.code",
@@ -102,7 +102,7 @@
         "operation": "editMessageText",
         "chatId": "={{ $json.chat_id }}",
         "messageId": "={{ $json.message_id }}",
-        "text": "=✅ *Approuvé* par {{$json.user}}\n\n📌 {{$json.theme}}\n\n📗 *En attente de publication* (Phase 5)\n\n🪝 {{$json.hook}}",
+        "text": "={{ `✅ *Approuvé* par ${$json.user}\n\n📌 ${$json.theme || 'thème inconnu'}\n\n📗 *En attente de publication* (Phase 5)\n\n🪝 ${$json.hook || '—'}\n\n${$json.qualite === 'non_conforme' ? '⚠️ Approuvé alors que le filtre P0 avait signalé le contenu comme non conforme. — publication n° ' : '_Publication n° '}${$json.total_approuves} ` }}",
         "additionalFields": {
           "parse_mode": "Markdown"
         },
@@ -150,6 +150,148 @@
         }
       },
       "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "route-1",
+              "leftValue": "={{ $json.callback_query ? 'callback' : 'message' }}",
+              "rightValue": "callback",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "name": "Route Evenement",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        200,
+        460
+      ],
+      "id": "route-evenement-1"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Isole le chat du circuit d'approbation.\n// Un bot Telegram ne recoit PAS ses propres messages, mais un garde-fou reste\n// necessaire : une piece jointe, une commande, ou un autre chat doivent etre\n// ignores SANS consommer une generation de 23 s.\nconst body = $input.first().json;\n\n// Telegram n autorise qu UN webhook par jeton : ce workflow sert donc aussi de\n// point d'entree du chat. Toute erreur ici tuerait l'approbation, d'ou le throw\n// explicite plutot qu'un silence.\nconst msg = body.message;\nif (!msg) throw new Error('ni callback_query ni message : declenchement inattendu.');\n\nconst ALLOWED_CHAT = '5387896782';\nconst chat_id = String(msg.chat?.id ?? '');\nif (chat_id !== ALLOWED_CHAT) {\n  return [{ json: { ignore: true, raison: 'chat non autorise (' + chat_id + ')' } }];\n}\nif (msg.from?.is_bot) {\n  return [{ json: { ignore: true, raison: 'message emanant d un bot' } }];\n}\nconst text = String(msg.text ?? '').trim();\nif (!text) {\n  return [{ json: { ignore: true, raison: 'pas de texte (media, sticker, service)' } }];\n}\n// Les commandes ne declenchent pas de reponse : elles_eviteraient une boucle\n// si le bot se reparlait a lui-meme via une commande.\nif (text.startsWith('/')) {\n  return [{ json: { ignore: true, raison: 'commande : ' + text.split(' ')[0] } }];\n}\n\nreturn [{ json: {\n  ignore: false,\n  chat_id,\n  message_id: String(msg.message_id ?? ''),\n  user: msg.from?.username || String(msg.from?.id ?? ''),\n  text\n} }];"
+      },
+      "name": "Guard Chat",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        420,
+        620
+      ],
+      "id": "guard-chat-1"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://nestor-ai.biz-4-africa.com/hermes/api/chat",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"llama3.2:3b\",\n    \"system\": \"Tu es l assistant de BIZ4A. REGLE ABSOLUE : tu ne reponds qu avec les faits de cette fiche, et rien d autre. Si la question sort de la fiche, reponds exactement : je n ai pas cette information, demande a l equipe BIZ4A. N invente jamais un chiffre, une date, un client, un chiffre d affaires, un statut juridique ni une action publique. Ne dis jamais que BIZ4A est un service public ou cree par l Etat. Reponds en francais, bref et concret.\\n\\nFICHE (source unique) :\\n- BIZ4A est une ENTREPRISE PRIVEE de services pour les PME africaines.\\n- Elle n est ni un service public, ni une initiative de l Etat.\\n- Services : implementation et infogerence Odoo, developpement web, feuille de route numerique, automatisation, formation.\\n- Public : PME et ETI d Afrique francophone et anglophone.\\n- Aucun chiffre d affaires, volume, nombre de clients ni date n est connu : si on les demande, dire que l information n est pas disponible.\",\n  \"messages\": [ { \"role\": \"user\", \"content\": {{ JSON.stringify($json.text) }} } ],\n  \"stream\": false,\n  \"keep_alive\": \"30m\",\n  \"options\": { \"temperature\": 0.7, \"num_predict\": 600 }\n}",
+        "options": {
+          "timeout": 180000
+        }
+      },
+      "name": "Hermes Chat (Ollama)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        420,
+        620
+      ],
+      "id": "hermes-chat-1",
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 3000,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extrait la reponse du modele et la borne pour Telegram (4096 caracteres max).\n// parse_mode n'est PAS pose : un simple _ ou * produit par le modele ferait\n// echouer l'API en 400 \"can't parse entities\" (cf. WORKPLAN.md §9).\n// chat_id est relu chez Guard Chat, PAS dans l'entree : le noeud HTTP\n// remplace integralement la charge utile par la reponse d'Ollama.\n// C'est le meme piege que WORKPLAN.md §8.1, version HTTP.\nconst j = $input.first().json;\nconst chat_id = $('Guard Chat').first().json.chat_id;\nif (!chat_id) throw new Error('chat_id introuvable en amont : la reponse ne peut pas etre adressee.');\n\nconst content = String(j.message?.content ?? j.response ?? '').trim();\nif (!content) {\n  throw new Error(\n    'Reponse vide du modele (done_reason=' + (j.done_reason || 'n/a') +\n    ', eval_count=' + (j.eval_count ?? 'n/a') + ')'\n  );\n}\n\nconst LIMITE = 4000;\nconst answer = content.length > LIMITE\n  ? content.slice(0, LIMITE) + '\\n\\n[tronque par la limite Telegram]'\n  : content;\n\nreturn [{ json: {\n  chat_id,\n  answer,\n  tronque: content.length > LIMITE,\n  duree_s: typeof j.total_duration === 'number' ? Math.round(j.total_duration / 1e6 / 100) / 10 : null,\n  eval_count: j.eval_count ?? null\n} }];"
+      },
+      "name": "Reponse Hermes",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        860,
+        620
+      ],
+      "id": "reponse-hermes-1"
+    },
+    {
+      "parameters": {
+        "operation": "sendMessage",
+        "chatId": "={{ $json.chat_id }}",
+        "text": "={{ $json.answer }}",
+        "additionalFields": {}
+      },
+      "name": "Telegram Reponse",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1080,
+        620
+      ],
+      "id": "telegram-reponse-1",
+      "credentials": {
+        "telegramApi": {
+          "id": "o2cm9Tyzy89zPU7X",
+          "name": "Telegram account"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "pertinent-1",
+              "leftValue": "={{ $json.ignore }}",
+              "rightValue": false,
+              "operator": {
+                "type": "boolean",
+                "operation": "false",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "name": "Message pertinent ?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        640,
+        620
+      ],
+      "id": "message-pertinent-1"
     }
   ],
   "connections": {
@@ -157,7 +299,7 @@
       "main": [
         [
           {
-            "node": "Parse Decision",
+            "node": "Route Evenement",
             "type": "main",
             "index": 0
           }
@@ -209,6 +351,69 @@
         [
           {
             "node": "Edit Message Approuve",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route Evenement": {
+      "main": [
+        [
+          {
+            "node": "Parse Decision",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Guard Chat",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Guard Chat": {
+      "main": [
+        [
+          {
+            "node": "Message pertinent ?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Message pertinent ?": {
+      "main": [
+        [
+          {
+            "node": "Hermes Chat (Ollama)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "Hermes Chat (Ollama)": {
+      "main": [
+        [
+          {
+            "node": "Reponse Hermes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Reponse Hermes": {
+      "main": [
+        [
+          {
+            "node": "Telegram Reponse",
             "type": "main",
             "index": 0
           }

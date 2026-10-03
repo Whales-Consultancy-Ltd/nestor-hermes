@@ -40,7 +40,7 @@
         "url": "https://nestor-ai.biz-4-africa.com/hermes/api/generate",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={\n  \"model\": \"llama3.2:3b\",\n  \"prompt\": \"Redige un post LinkedIn pour BIZ4A sur le theme : {{$json.theme}}. Public : dirigeants de PME africaines. Ton direct et concret. Remplis hook (1 phrase), body (3 phrases maximum), call_to_action (1 phrase). Sois bref : la reponse doit tenir sous 150 mots.\",\n  \"stream\": false,\n  \"format\": {\n    \"type\": \"object\",\n    \"properties\": {\n      \"hook\": {\n        \"type\": \"string\"\n      },\n      \"body\": {\n        \"type\": \"string\"\n      },\n      \"call_to_action\": {\n        \"type\": \"string\"\n      }\n    },\n    \"required\": [\n      \"hook\",\n      \"body\",\n      \"call_to_action\"\n    ]\n  },\n  \"options\": {\n    \"num_predict\": 900,\n    \"temperature\": 0.7,\n    \"top_p\": 0.9\n  }\n}",
+        "jsonBody": "={\n  \"model\": \"llama3.2:3b\",\n  \"prompt\": \"Redige un post LinkedIn pour BIZ4A sur le theme : {{$json.theme}}.\\nPublic : dirigeants de PME africaines. Ton direct et concret.\\n\\nINTERDICTIONS ABSOLUES, controlees automatiquement ; le post sera refuse :\\n- Premiere personne interdite : jamais je, moi, mon, ma, mes. Le pluriel notre/nous est autorise pour parler de BIZ4A.\\n- Ne raconte aucune experience personnelle, meme precedee de la formule En tant que.\\n- Aucun chiffre, pourcentage, montant, date ni duree. Les seules donnees disponibles sont le theme ci-dessus : n invente aucune statistique.\\n- N attribue aucun resultat, aucun gain et aucun cout reduit a BIZ4A.\\n\\nREGLES : hook = 1 phrase, body = 3 phrases maximum, call_to_action = 1 phrase. Ecris a la troisieme personne ou sous forme de conseil generique. Reponse sous 150 mots.\",\n  \"stream\": false,\n  \"format\": {\n    \"type\": \"object\",\n    \"properties\": {\n      \"hook\": {\n        \"type\": \"string\"\n      },\n      \"body\": {\n        \"type\": \"string\"\n      },\n      \"call_to_action\": {\n        \"type\": \"string\"\n      }\n    },\n    \"required\": [\n      \"hook\",\n      \"body\",\n      \"call_to_action\"\n    ]\n  },\n  \"options\": {\n    \"num_predict\": 900,\n    \"temperature\": 0.7,\n    \"top_p\": 0.9\n  }\n}",
         "options": {
           "timeout": 180000
         }
@@ -60,7 +60,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// Normalise la reponse d'Ollama en champs stables.\n// Supporte : structured outputs (format=schema), JSON brut, ou texte avec objet imbrique.\nconst data = $input.first().json;\nconst theme = $('Theme Picker').first().json.theme;\n\nconst raw = data.response ?? data.message?.content ?? '';\nlet parsed = null;\n\nconst tryParse = (s) => { try { return JSON.parse(s); } catch (_) { return null; } };\n\nif (typeof raw === 'object' && raw !== null) parsed = raw;\nelse {\n  parsed = tryParse(String(raw));\n  if (!parsed) {\n    const m = String(raw).match(/\\{[\\s\\S]*\\}/);\n    if (m) parsed = tryParse(m[0]);\n  }\n}\n\nconst repair = (s) => {\n  let t = String(s).trim();\n  const lastKey = Math.max(t.lastIndexOf(':\"'), t.lastIndexOf('\",'), t.lastIndexOf(',\"'));\n  if (lastKey > 0) t = t.slice(0, lastKey + 1);\n  t = t.replace(/\"[^\"]*$/s, '');\n  let depth = 0;\n  for (const ch of t) { if (ch === '{') depth++; else if (ch === '}') depth--; }\n  return tryParse(t + '\"' + '}'.repeat(Math.max(0, depth)));\n};\n\n// Si la generation a ete tronquee (done_reason=length), le JSON est\n// invalide : on le repare plutot que de perdre la generation.\nif (!parsed) parsed = repair(raw);\n\nconst field = (k) => {\n  const v = parsed?.[k];\n  return typeof v === 'string' ? v.trim() : '';\n};\n\nconst hook = field('hook');\nconst body = field('body');\nconst call_to_action = field('call_to_action');\n\nif (!hook && !body && !call_to_action) {\n  throw new Error(\n    'Reponse LLM inexploitable (modele=' + (data.model || 'n/a') +\n    ', done_reason=' + (data.done_reason || 'n/a') +\n    ', eval_count=' + (data.eval_count != null ? data.eval_count : 'n/a') +\n    '). Brut: ' + String(raw).slice(0, 300)\n  );\n}\n\n// Le message Telegram est envoye en parse_mode Markdown (legacy).\n// Sans echappement, un simple \"_\" ou \"*\" produit par le modele fait\n// echouer l'API Telegram en 400 \"can't parse entities\".\nconst md = (s) => String(s).replace(/([_*`[\\]])/g, '\\\\$1');\n\nreturn [{\n  json: {\n    theme,\n    hook,\n    body,\n    call_to_action,\n    // versions echappees, pretes pour Telegram\n    hook_md: md(hook),\n    body_md: md(body),\n    cta_md: md(call_to_action),\n    complete: !!(hook && body && call_to_action),\n    model: data.model ?? 'llama3.2:3b',\n    total_duration_ms: typeof data.total_duration === 'number' ? Math.round(data.total_duration / 1e6) : null,\n    raw_preview: String(raw).slice(0, 300)\n  }\n}];"
+        "jsCode": "// Normalise la reponse d'Ollama en champs stables.\n// Supporte : structured outputs (format=schema), JSON brut, ou texte avec objet imbrique.\nconst data = $input.first().json;\nconst theme = $('Theme Picker').first().json.theme;\n\nconst raw = data.response ?? data.message?.content ?? '';\nlet parsed = null;\n\nconst tryParse = (s) => { try { return JSON.parse(s); } catch (_) { return null; } };\n\nif (typeof raw === 'object' && raw !== null) parsed = raw;\nelse {\n  parsed = tryParse(String(raw));\n  if (!parsed) {\n    const m = String(raw).match(/\\{[\\s\\S]*\\}/);\n    if (m) parsed = tryParse(m[0]);\n  }\n}\n\nconst repair = (s) => {\n  let t = String(s).trim();\n  const lastKey = Math.max(t.lastIndexOf(':\"'), t.lastIndexOf('\",'), t.lastIndexOf(',\"'));\n  if (lastKey > 0) t = t.slice(0, lastKey + 1);\n  t = t.replace(/\"[^\"]*$/s, '');\n  let depth = 0;\n  for (const ch of t) { if (ch === '{') depth++; else if (ch === '}') depth--; }\n  return tryParse(t + '\"' + '}'.repeat(Math.max(0, depth)));\n};\n\n// Si la generation a ete tronquee (done_reason=length), le JSON est\n// invalide : on le repare plutot que de perdre la generation.\nif (!parsed) parsed = repair(raw);\n\nconst field = (k) => {\n  const v = parsed?.[k];\n  return typeof v === 'string' ? v.trim() : '';\n};\n\nconst hook = field('hook');\nconst body = field('body');\nconst call_to_action = field('call_to_action');\n\nif (!hook && !body && !call_to_action) {\n  throw new Error(\n    'Reponse LLM inexploitable (modele=' + (data.model || 'n/a') +\n    ', done_reason=' + (data.done_reason || 'n/a') +\n    ', eval_count=' + (data.eval_count != null ? data.eval_count : 'n/a') +\n    '). Brut: ' + String(raw).slice(0, 300)\n  );\n}\n\n// Le message Telegram est envoye en parse_mode Markdown (legacy).\n// Sans echappement, un simple \"_\" ou \"*\" produit par le modele fait\n// echouer l'API Telegram en 400 \"can't parse entities\".\nconst md = (s) => String(s).replace(/([_*`[\\]])/g, '\\\\$1');\n\n// --- P0 : filtre de conformite editoriale (cf. WORKPLAN.md, section 2) ---\n// Deux controles independants :\n//   1. aucune premiere personne (je, mon, notre, ...) ;\n//   2. aucun chiffre absent des donnees d'entree.\n// Le prompt seul ne suffit pas sur un modele 3b : ce filtre est le garde-fou.\n// Un echec met complete=false et alimente quality_flags ; le contenu reste\n// visible pour correction, la publication automatique reste fermee.\nconst quality_flags = [];\nconst flag = (code, detail) => {\n  const entry = code + (detail ? ' (' + detail + ')' : '');\n  if (!quality_flags.includes(entry)) quality_flags.push(entry);\n};\n\nconst FIRST_PERSON = [\n  ['premiere personne', /(?:\\bje\\b|\\bj['\\u2019]|\\bmoi\\b)/i],\n  ['possessif', /(?:\\bmon\\b|\\bma\\b|\\bmes\\b)/i]\n];\n\n// P2 : un champ manquant est signale comme les autres alertes. Sans cela le\n// contenu incomplet partait avec un simple champ vide, sans aucun signal\n// pour l'approbateur (alerte complete=false absente, cf. WORKPLAN.md P2).\nfor (const [k, v] of Object.entries({ hook, body, call_to_action })) {\n  if (!v) flag('champ manquant', k);\n}\n\n// Chiffres autorises : ceux presents dans les donnees d'entree, donc le seul\n// theme. Le theme n'en contient aucun -> tout chiffre libre est invente.\n// Les chiffres INTEGRES a un mot (la marque BIZ4A, Odoo19) sont ignores :\n// ils ne sont pas une donnee chiffree, mais un nom propre.\nconst allowed_numbers = new Set(\n  (String(theme).match(/(?<![\\p{L}\\d])\\d+(?:[.,]\\d+)?(?![\\p{L}])/gu) || []).map((n) => n.replace(',', '.'))\n);\n\nfor (const [fieldName, value] of Object.entries({ hook, body, call_to_action })) {\n  if (!value) continue;\n  for (const [label, re] of FIRST_PERSON) {\n    const m = value.match(re);\n    if (m) flag(label, fieldName + ' : ' + m[0]);\n  }\n  for (const num of (value.match(/(?<![\\p{L}\\d])\\d+(?:[.,]\\d+)?(?![\\p{L}])/gu) || [])) {\n    if (!allowed_numbers.has(num.replace(',', '.'))) {\n      flag('chiffre non source', fieldName + ' : ' + num);\n    }\n  }\n}\n\nreturn [{\n  json: {\n    theme,\n    hook,\n    body,\n    call_to_action,\n    // versions echappees, pretes pour Telegram\n    hook_md: md(hook),\n    body_md: md(body),\n    cta_md: md(call_to_action),\n    complete: !!(hook && body && call_to_action) && quality_flags.length === 0,\n    // versions echappees des alertes, pretes pour Telegram\n    quality_flags,\n    quality_flags_md: quality_flags.map(md),\n    model: data.model ?? 'llama3.2:3b',\n    total_duration_ms: typeof data.total_duration === 'number' ? Math.round(data.total_duration / 1e6) : null,\n    raw_preview: String(raw).slice(0, 300)\n  }\n}];"
       },
       "name": "Parse Content",
       "type": "n8n-nodes-base.code",
@@ -75,7 +75,7 @@
       "parameters": {
         "operation": "sendMessage",
         "chatId": "5387896782",
-        "text": "=🤖 *Contenu BIZ4A — validation requise*\n\n📌 Thème : {{$json.theme}}\n\n🪝 Hook :\n{{$json.hook_md}}\n\n📄 Body :\n{{$json.body_md}}\n\n📗 CTA :\n{{$json.cta_md}}\n\n_⏱ {{ $json.total_duration_ms ? ($json.total_duration_ms / 1000).toFixed(1) + ' s' : 'n/a' }}_",
+        "text": "={{ (($json.quality_flags_md && $json.quality_flags_md.length) ? '⚠️ *NON CONFORME — ne pas approuver sans correction*\\n' + $json.quality_flags_md.map((f) => '• ' + f).join('\\n') + '\\n\\n'  : '') + `🤖 *Contenu BIZ4A — validation requise*\n\n📌 Thème : ${$json.theme}\n\n🪝 Hook :\n${$json.hook_md}\n\n📄 Body :\n${$json.body_md}\n\n📗 CTA :\n${$json.cta_md}\n\n_⏱ ${$json.total_duration_ms ? ($json.total_duration_ms / 1000).toFixed(1) + ' s' : 'n/a'}_` }}",
         "replyMarkup": "inlineKeyboard",
         "inlineKeyboard": {
           "rows": [
@@ -113,8 +113,8 @@
       "type": "n8n-nodes-base.telegram",
       "typeVersion": 1.2,
       "position": [
-        1050,
-        300
+        1360,
+        220
       ],
       "id": "telegram-approval-1",
       "credentials": {
@@ -134,6 +134,110 @@
         500
       ],
       "id": "manual-trigger-1"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "a1b2c3d4-0000-4000-8000-000000000001",
+              "leftValue": "={{ $json.complete }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "name": "Est conforme ?",
+      "position": [
+        960,
+        220
+      ],
+      "id": "if-conforme-1"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Bucle de regeneration (cf. WORKPLAN.md, P0) : garde le numero d'essai\n// entre deux passages. .last() et non .first() pour relire l'iteration\n// courante -- avec .first() la boucle ne progresserait jamais.\n//\n// theme est retransmis : le noeud LLM Request lit {{$json.theme}}, et\n// le retour de boucle ne recoit que la sortie de ce compteur.\nconst prev = $('Compteur Tentative').last().json.attempt ?? 0;\nconst attempt = prev + 1;\nif (attempt > 3) throw new Error('Bucle de regeneration non bornee.');\nconst theme = $('Theme Picker').first().json.theme;\nreturn [{ json: { attempt, max_attempts: 3, theme } }];"
+      },
+      "name": "Compteur Tentative",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        960,
+        380
+      ],
+      "id": "compteur-tentative-1"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "a1b2c3d4-0000-4000-8000-000000000002",
+              "leftValue": "={{ $json.attempt }}",
+              "rightValue": "3",
+              "operator": {
+                "type": "number",
+                "operation": "lt",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "name": "Tentative Epuisee ?",
+      "position": [
+        1160,
+        380
+      ],
+      "id": "if-epuisee-1"
+    },
+    {
+      "parameters": {
+        "operation": "sendMessage",
+        "chatId": "5387896782",
+        "text": "=⚠️ *BIZ4A — generation abandonnee*\n\nLe contenu n'a pas ete approuvable apres 3 tentatives :\n• premiere personne ou possessif (mon/ma/mes)\n• chiffre absent des donnees d'entree\n\nModele `llama3.2:3b` : la qualite de sortie reste le facteur limitant (P0)."
+      },
+      "name": "Alerte Echec",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1360,
+        460
+      ],
+      "id": "telegram-alerte-1",
+      "credentials": {
+        "telegramApi": {
+          "id": "o2cm9Tyzy89zPU7X",
+          "name": "Telegram account"
+        }
+      }
     }
   ],
   "connections": {
@@ -185,11 +289,63 @@
       "main": [
         [
           {
-            "node": "Telegram Approval",
+            "node": "Est conforme ?",
             "type": "main",
             "index": 0
           }
         ]
+      ]
+    },
+    "Est conforme ?": {
+      "main": [
+        [
+          {
+            "node": "Telegram Approval",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Compteur Tentative",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Compteur Tentative": {
+      "main": [
+        [
+          {
+            "node": "Tentative Epuisee ?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Tentative Epuisee ?": {
+      "main": [
+        [
+          {
+            "node": "LLM Request (Ollama)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Alerte Echec",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Telegram Approval": {
+      "main": [
+        []
       ]
     }
   },
