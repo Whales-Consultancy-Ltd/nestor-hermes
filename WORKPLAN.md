@@ -311,6 +311,70 @@ Exécutions **#52 à #54** : `success`, `Telegram Reponse ok=true`, `message_id`
 
 ---
 
+## 4 ter. Règle de nommage — « Nestor v1.0.0 » vs « Ollama BIZ4A » (2026-10-03, décision Vincent)
+
+**« Hermes » est un terme proscrit** dans le vocabulaire de la plateforme. Trois
+entités coexistent et se confondaient jusqu'à produire une fausse installation
+(leçon gravée en SSOT : `nestor-rules.md` P68 + P69).
+
+| Entité | Désignation officielle | Nature | Où |
+|---|---|---|---|
+| L'agent (produit Nous Research, MIT) | **Nestor v1.0.0** | Agent : outils, mémoire, skills, cron, gateway 25+ plateformes | `~/.hermes/`, CLI `hermes`, repo upstream `NousResearch/hermes-agent` |
+| Le serveur de modèles | **Ollama BIZ4A** | Serveur d'inférence — **pas un agent** | conteneur `nestor-hermes`, `https://nestor-ai.biz-4-africa.com/hermes` |
+| Le modèle `nous-hermes2` | **modèle nous-hermes2** | Poids LLM | disque du conteneur |
+
+Écrire « Hermes » ou « Nestor » sans qualificatif est **interdit**.
+
+Le chemin technique `~/.hermes/` **reste** `~/.hermes/` : c'est un artefact amont,
+non renommable sans casser `hermes update`. Le renommage est fonctionnel et
+documentaire, pas physique. `HERMES_HOME` reste la variable d'env du produit.
+
+> §4 bis ci-dessus parle du chat Telegram n8n branché sur **Ollama BIZ4A** : c'est
+> un intervieweur `llama3.2:3b` dans un workflow n8n, **pas** Nestor v1.0.0. Les
+> deux sont des surfaces de conversation mais ce sont des systèmes distincts.
+
+### Surfaces d'accès à Nestor v1.0.0
+
+Toutes partagent le même `~/.hermes/state.db` : une session commencée dans la TUI
+se reprend dans le navigateur et sur Telegram.
+
+| Surface | Commande | Usage |
+|---|---|---|
+| TUI | `hermes --tui` | terminal (Node ≥ 20 requis) |
+| Dashboard web | `hermes dashboard` → `http://127.0.0.1:9119` | Chrome ; l'onglet Chat héberge la vraie TUI en xterm.js |
+| Gateway | `hermes gateway` | Telegram et 24 autres plateformes |
+| API server | toolset `hermes-api-server` | compatible OpenAI |
+
+Le dashboard est **borné à loopback, sans login**. Un bind hors loopback
+(`--host 0.0.0.0`) **engage un gate d'auth obligatoire** et le serveur refuse de
+démarrer sans provider configuré — c'est un refus volontaire, pas une panne.
+
+### Contrainte de modèle
+
+Nestor v1.0.0 **refuse de démarrer sous 64k de contexte**. `llama3.2:3b` sur
+Ollama BIZ4A est à 2 vCPU : il ne peut pas servir d'agent outillé.
+
+Source de vérité des fournisseurs : **`/srv/nestor-agent-platform/conf/llm-registry.yaml`**
+(8 fournisseurs, non-secret, avec l'état de chaque clé). **Jamais** la liste des
+modèles dans un fichier de clés. Au 2026-09-03 : `llmkiwi` gratuit et healthy,
+`gemini` / `mistral` / `cloudflare` / `bazaarlink` opérationnels ;
+`openrouter` en backoff 404, `deepseek` et `openai` dégradés (solde épuisé).
+
+### Vérifier la présence avant de conclure
+
+```bash
+which hermes                 # binaire publié ?
+ls -d ~/.hermes             # install en cours ou déjà faite ?
+pgrep -af 'launch.py install'   # l'install tourne-t-elle encore ?
+```
+
+Un `which hermes` vide **ne prouve pas** l'absence de l'agent : l'install
+télécharge ~500 Mo et crée le venv **avant** de publier le binaire. Conclure
+« non installé » sur cette seule commande est une **fausse négative** — c'est
+exactement l'erreur commise le 2026-10-03.
+
+---
+
 ## 5. Les workflows
 
 ### Sources de vérité
@@ -427,7 +491,6 @@ le coffre. `check-secrets.sh` passe sur l'ensemble.
 | `scripts/test-quality-filter.js` | 12 cas du filtre P0, lus depuis le workflow | non |
 | `scripts/test-telegram-roundtrip.js` | message généré → relu par l'approbateur | non |
 | `scripts/verify-p0-quality.js` | 10 générations réelles + filtre déployé | Ollama |
-| `scripts/hermes-chat.js` | **terminal interactif** vers Hermes (REPL + one-shot) | Ollama |
 
 Les deux scripts réseau acceptent `N8N_IP=<ip>` : le SNI/TLS reste correct sans
 toucher à `/etc/hosts` ni demander root. Indispensable pendant la panne DNS (§0).
@@ -436,35 +499,21 @@ toucher à `/etc/hosts` ni demander root. Indispensable pendant la panne DNS (§
 node scripts/test-quality-filter.js      # garde-fou, < 1 s, hors ligne
 node scripts/test-telegram-roundtrip.js
 node scripts/verify-p0-quality.js 10     # ~6 min, 10 appels Ollama serialisés
-node scripts/hermes-chat.js              # terminal interactif Hermes
 ```
 
-#### Terminal interactif Hermes — `scripts/hermes-chat.js`
+#### Interaction avec le modèle — ne pas réimplémenter
 
-REPL vers l'endpoint public du conteneur `nestor-hermes`, pour interagir avec
-le modèle déployé sans passer par n8n ni par l'UI. Sans secret :
-lecture seule sur une API publique, l'URL est surchargeable par `HERMES_URL`.
+Il existedici `scripts/hermes-chat.js`, un REPL Node écrit à la main sur
+l'API `/api/chat` du conteneur `nestor-hermes`. **Il a été supprimé** : c'était
+une réimplémentation d'un produit qui existe déjà.
 
-```bash
-node scripts/hermes-chat.js                          # llama3.2:3b, flux + métriques
-node scripts/hermes-chat.js -m nous-hermes2:latest   # 11B, ~176 s (§4)
-node scripts/hermes-chat.js -s "tu es BIZ4A" -p "..." # one-shot, stdout = réponse brute
-```
+L'outil pour discuter avec un modèle n'est pas un script de ce dépôt, c'est
+**Nestor v1.0.0** (= le produit *Hermes Agent* de Nous Research) — § 4 bis.
+Sa TUI et son dashboard web remplacent ce REPL, avec en plus les outils, la
+mémoire persistante et les skills.
 
-Commandes : `/stat` (endpoint, modèles réellement présents, modèle chargé),
-`/modele`, `/systeme`, `/temperature`, `/limite`, `/reset`, `/historique`,
-`/sortir`.
-
-Deux points qui ne sont pas évidents à l'usage :
-
-- **`OLLAMA_NUM_PARALLEL=1`** (§4) : une génération à la fois. Une seconde
-  requête lancée en parallèle **attend** le modèle, elle ne le précharge pas.
-- **`keep_alive: 30m`** est renvoyé à chaque appel. Sans cela, la première
-  génération après 30 min d'inactivité paie les ~61 s de chargement disque
-  (§4). Le REPL maintient le modèle chaud entre deux questions.
-- Une réponse qui s'arrête net sur `num_predict` est signalée par
-  `⚠ tronque` dans la ligne de métriques — c'est la cause du §9 « Error au
-  niveau n8n », visible ici sans passer par les logs.
+> **Le vocabulaire « Hermes » est ambigu et distingue deux choses sans rapport.**
+> Cf. § 4 bis pour la règle de nommage.
 
 ---
 
