@@ -3,7 +3,8 @@
 #
 # Deux chores P4 du WORKPLAN, qui ne peuvent pas passer par l'API publique :
 #   archive-dup   archiver le doublon inactif BIZ4A_Content_Generator
-#   clean-backups supprimer les fichiers .bak laisses sur /srv
+#   list-baks    inventorier les .bak (lecture seule)
+#   clean-backups supprimer les COPIES DE COFFRE (.env.bak*), pas les rollbacks
 #   status        etat de la sante du conteneur n8n
 #
 # REGLE ABSOLUE : aucun DELETE sur un workflow. Une sonde DELETE a deja detruit
@@ -96,17 +97,34 @@ archive-dup)
   fi
   ;;
 
-clean-backups)
-  echo "== fichiers .bak sur $PLATFORM_DIR =="
-  warn "suppression definitive : verifier la liste avant --apply."
-  remote "cd $PLATFORM_DIR && ls -la .env.bak.* docker-compose*.yml.bak* docker-compose.override.yml.bak.* 2>/dev/null || echo '  (aucun fichier .bak trouve)'"
+list-baks)
+  echo "== inventaire des .bak sur $PLATFORM_DIR =="
+  echo "   (lecture seule, aucune suppression)"
+  remote "cd $PLATFORM_DIR && ls -la *.bak* 2>/dev/null || echo '  (aucun)'"
   echo
-  echo " Ces fichiers contiennent potentiellement des secrets. Les supprimer est le bon geste ;"
-  echo "  ils ne doivent surtout pas etre archives dans le depot (meme prive)."
-  remote "cd $PLATFORM_DIR && rm -f .env.bak.* docker-compose.yml.bak-trustproxy-* docker-compose.override.yml.bak.*"
-  if [[ $APPLY -eq 1 ]]; then
-    remote "cd $PLATFORM_DIR && ls -la .env.bak.* docker-compose*.yml.bak* 2>/dev/null || echo '  plus aucun .bak : OK'"
-  fi
+  echo " Classification :"
+  echo "  - .env.bak*        COPIE D UN COFFRE. contient des secrets en clair."
+  echo "                      A supprimer : le .env vivant fait foi."
+  echo "  - docker-compose*.bak*  points de rollback du deploiement."
+  echo "                      A CONSERVER : certains sont les predecesseurs"
+  echo "                      directs de la config qui tourne en production."
+  echo
+  warn "suppression definitive : les motifs sont explicites et separes."
+  warn "les .bak de compose ne sont PAS dans le motif de suppression."
+  ;;
+
+clean-backups)
+  # Motif VOLONTAIREMENT etroit : uniquement les copies de coffre.
+  # Les .bak de compose sont des points de rollback sur un hote en
+  # production ; les supprimer serait irremversible et sans gain de securite
+  # (ils ne contiennent pas de secret en clair, seulement des references).
+  echo "== purge des COPIES DE COFFRE sur $PLATFORM_DIR =="
+  remote "cd $PLATFORM_DIR && ls -la .env.bak* 2>/dev/null || echo '  (aucune copie de coffre)'"
+  echo
+  warn "ces fichiers contiennent des secrets en clair (26 motifs detectes le"
+  warn "2026-10-03). Ils ne doivent SURTOUT pas etre archives dans un depot."
+  remote "cd $PLATFORM_DIR && rm -f .env.bak*"
+  remote "cd $PLATFORM_DIR && ls -la .env.bak* 2>/dev/null || echo '  plus aucune copie de coffre : OK'"
   ;;
 
 *)

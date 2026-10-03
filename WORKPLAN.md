@@ -313,10 +313,16 @@ Bot utilisé : **`@the_hat_trader_bot`** — distinct de `@The_real_nestor_ai_bo
 
 ---
 
-## 4 bis. Chat Telegram vers Hermes
+## 4 bis. Chat Telegram vers **Ollama BIZ4A**
 
 **Écrit le 2026-10-03, déployé et prouvé.** Écris un message à `@the_hat_trader_bot`,
-Hermes répond.
+le modèle répond.
+
+> Ce chat interroge **Ollama BIZ4A** (`llama3.2:3b`), pas Nestor v1.0.0. Nestor v1.0.0
+> dispose de son propre `hermes gateway` pour Telegram : les deux se recoupent, et
+> celui de Nestor v1.0.0 est supérieur (mémoire persistante, skills, cron). Ce
+> chat n8n est un intervieweur `llama3.2:3b`, utile tant que le gateway n'est pas
+> en service — voir §4 ter.
 
 ### Contrainte structurante : un seul webhook par jeton
 
