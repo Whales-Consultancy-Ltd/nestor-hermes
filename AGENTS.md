@@ -40,7 +40,7 @@ Si un secret a été écrit par erreur : le révoquer d'abord, puis nettoyer l'h
 
 | À écrire | Ne pas écrire |
 |---|---|
-| **Nestor v1.0.0** (l'agent) | « Hermes » |
+| **Nestor Agent v1.0.0** (l'agent) | « Hermes » |
 | **Ollama BIZ4A** (le serveur de modèles) | « Hermes », « le modèle » |
 | **modèle nous-hermes2** (les poids) | « Hermes » |
 
@@ -62,5 +62,5 @@ git show origin/main:fichier | grep -c '^<<<<<<<'   # état réel de la SSOT
 ssh aegis ... <commande>       # l'hôte distant, pas une supposition
 ```
 
-Un `which` vide ne prouve pas une absence : l'install de Nestor v1.0.0 télécharge ~500 Mo
+Un `which` vide ne prouve pas une absence : l'install de Nestor Agent v1.0.0 télécharge ~500 Mo
 et crée son environnement **avant** de publier le binaire.

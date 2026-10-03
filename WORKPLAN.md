@@ -321,9 +321,9 @@ Bot utilisé : **`@the_hat_trader_bot`** — distinct de `@The_real_nestor_ai_bo
 **Écrit le 2026-10-03, déployé et prouvé.** Écris un message à `@the_hat_trader_bot`,
 le modèle répond.
 
-> Ce chat interroge **Ollama BIZ4A** (`llama3.2:3b`), pas Nestor v1.0.0. Nestor v1.0.0
+> Ce chat interroge **Ollama BIZ4A** (`llama3.2:3b`), pas Nestor Agent v1.0.0. Nestor Agent v1.0.0
 > dispose de son propre `hermes gateway` pour Telegram : les deux se recoupent, et
-> celui de Nestor v1.0.0 est supérieur (mémoire persistante, skills, cron). Ce
+> celui de Nestor Agent v1.0.0 est supérieur (mémoire persistante, skills, cron). Ce
 > chat n8n est un intervieweur `llama3.2:3b`, utile tant que le gateway n'est pas
 > en service — voir §4 ter.
 
@@ -377,29 +377,32 @@ Exécutions **#52 à #54** : `success`, `Telegram Reponse ok=true`, `message_id`
 
 ---
 
-## 4 ter. Règle de nommage — « Nestor v1.0.0 » vs « Ollama BIZ4A » (2026-10-03, décision Vincent)
+## 4 ter. Règle de nommage — « Nestor Agent v1.0.0 » vs « Ollama BIZ4A » (2026-10-03, décision Vincent)
 
-**« Hermes » est un terme proscrit** dans le vocabulaire de la plateforme. Trois
+**« Hermes » est un terme proscrit** dans le vocabulaire de la plateforme. Quatre
 entités coexistent et se confondaient jusqu'à produire une fausse installation
 (leçon gravée en SSOT : `nestor-rules.md` P68 + P69).
 
 | Entité | Désignation officielle | Nature | Où |
 |---|---|---|---|
-| L'agent (produit Nous Research, MIT) | **Nestor v1.0.0** | Agent : outils, mémoire, skills, cron, gateway 25+ plateformes | `~/.hermes/`, CLI `hermes`, repo upstream `NousResearch/hermes-agent` |
+| **La plateforme** | **Nestor** (versionnée : `Nestor Plateforme v1.0.0`) | La plateforme BIZ4A : agents, workflows, Odoo, supervision | dépôt `nestor-ai` |
+| L'agent (produit Nous Research, MIT) | **Nestor Agent v1.0.0** | Agent : outils, mémoire, skills, cron, gateway 25+ plateformes | `~/.hermes/`, CLI `hermes`, repo upstream `NousResearch/hermes-agent` |
 | Le serveur de modèles | **Ollama BIZ4A** | Serveur d'inférence — **pas un agent** | conteneur `nestor-hermes`, `https://nestor-ai.biz-4-africa.com/hermes` |
 | Le modèle `nous-hermes2` | **modèle nous-hermes2** | Poids LLM | disque du conteneur |
 
-Écrire « Hermes » ou « Nestor » sans qualificatif est **interdit**.
+Écrire « Hermes », « Nestor » ou « Nestor Agent v1.0.0 » sans qualificatif est **interdit**.
+`Nestor` nu — ou `Nestor v1.0.0` nu — désigne **la plateforme** ; tout produit dérivé
+porte un second mot (`Nestor Agent`, `Nestor Plateforme`).
 
 Le chemin technique `~/.hermes/` **reste** `~/.hermes/` : c'est un artefact amont,
 non renommable sans casser `hermes update`. Le renommage est fonctionnel et
 documentaire, pas physique. `HERMES_HOME` reste la variable d'env du produit.
 
 > §4 bis ci-dessus parle du chat Telegram n8n branché sur **Ollama BIZ4A** : c'est
-> un intervieweur `llama3.2:3b` dans un workflow n8n, **pas** Nestor v1.0.0. Les
+> un intervieweur `llama3.2:3b` dans un workflow n8n, **pas** Nestor Agent v1.0.0. Les
 > deux sont des surfaces de conversation mais ce sont des systèmes distincts.
 
-### Surfaces d'accès à Nestor v1.0.0
+### Surfaces d'accès à Nestor Agent v1.0.0
 
 Toutes partagent le même `~/.hermes/state.db` : une session commencée dans la TUI
 se reprend dans le navigateur et sur Telegram.
@@ -417,7 +420,7 @@ démarrer sans provider configuré — c'est un refus volontaire, pas une panne.
 
 ### Contrainte de modèle
 
-Nestor v1.0.0 **refuse de démarrer sous 64k de contexte**. `llama3.2:3b` sur
+Nestor Agent v1.0.0 **refuse de démarrer sous 64k de contexte**. `llama3.2:3b` sur
 Ollama BIZ4A est à 2 vCPU : il ne peut pas servir d'agent outillé.
 
 Source de vérité des fournisseurs : **`/srv/nestor-agent-platform/conf/llm-registry.yaml`**
@@ -574,7 +577,7 @@ l'API `/api/chat` du conteneur `nestor-hermes`. **Il a été supprimé** : c'ét
 une réimplémentation d'un produit qui existe déjà.
 
 L'outil pour discuter avec un modèle n'est pas un script de ce dépôt, c'est
-**Nestor v1.0.0** (= le produit *Hermes Agent* de Nous Research) — § 4 bis.
+**Nestor Agent v1.0.0** (= le produit *Hermes Agent* de Nous Research) — § 4 bis.
 Sa TUI et son dashboard web remplacent ce REPL, avec en plus les outils, la
 mémoire persistante et les skills.
 
